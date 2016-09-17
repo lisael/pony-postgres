@@ -150,6 +150,7 @@ actor ConnectionPool
     _sess.log(msg)
 
   be connect(auth: AmbientAuth) =>
+    log("connecting")
     let conn = Connection(auth, _sess, _host, _service, _params, this) 
 
   be got_pass(pass: String) =>
@@ -170,7 +171,7 @@ actor Session
 
   new create(env: Env,
              host: String="",
-             service: String="",
+             service: String="5432",
              user: String="",
              password: String = "",
              database: String = "") =>
