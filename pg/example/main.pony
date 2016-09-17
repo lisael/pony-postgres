@@ -4,8 +4,9 @@ pg.pony
 Do pg stuff.
 """
 use "pg"
+use "net"
 
 actor Main
   new create(env: Env) =>
-    env.out.print("Hello")
-
+    let sess = Session(env where user="abcdefghijkl", password="macflytest", database="macflytest")
+    sess.connect()

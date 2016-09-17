@@ -49,7 +49,7 @@ $(DEBUG_DIR):
 	mkdir -p $(DEBUG_DIR)
 
 $(DEBUG): $(PONY_SRC) 
-	$(PONYC) --debug -o $(DEBUG_DIR) $(PKG)/example
+	$(PONYC) --debug -p . -o $(DEBUG_DIR) $(PKG)/example
 
 doc: $(PONY_SRC) ## Build the documentation 
 	$(PONYC) -o $(BUILD_DIR) --docs --path . --pass=docs $(PKG)
