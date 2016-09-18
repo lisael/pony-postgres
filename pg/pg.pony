@@ -9,6 +9,30 @@ use "collections"
 use "promises"
 use "debug"
 
+interface StringCB
+  fun apply(s: String)
+interface PassCB is StringCB
+interface UserCB is StringCB
+
+primitive IdleTransction
+primitive ActiveTransaction
+primitive ErrorTransaction
+primitive UnknownTransactionStatus
+
+type TransactionStatus is (IdleTransction
+                          | ActiveTransaction
+                          | ErrorTransaction
+                          | UnknownTransactionStatus)
+
+primitive _StatusFromByte
+  fun apply(b: U8): TransactionStatus =>
+    match b
+    | 73 => IdleTransction // I
+    | 84 => ActiveTransaction // T
+    | 69 => ErrorTransaction // E
+    else
+      UnknownTransactionStatus
+    end
 
 trait Message
 interface ClientMessage is Message
@@ -28,7 +52,7 @@ class ClientMessageBase is ClientMessage
   fun ref _write(s: String) => _w.write(s)
   fun ref _i32(i: I32) => _w.i32_be(i)
   fun ref _done(id: U8): Array[ByteSeq] iso^ =>
-    if id != 0 then _out.u8(id) else Debug.out("Nope")end
+    if id != 0 then _out.u8(id) end
     _out.i32_be(_w.size().i32() + 4)
     _out.writev(_w.done())
     _out.done()
@@ -81,10 +105,30 @@ class NullServerMessage is ServerMessage
 class AuthenticationOkMessage is ServerMessage
 class ClearTextPwdRequest is ServerMessage
 class MD5PwdRequest is ServerMessage
+  let salt: Array[U8] val
+  new val create(salt': Array[U8] val)=>
+    salt = salt'
 class ErrorMessage is ServerMessage
   let items: Array[(U8, Array[U8] val)] val
   new val create(it: Array[(U8, Array[U8] val)] val) =>
     items = it
+
+class ParameterStatusMessage is ServerMessage
+  let key: String val
+  let value: String val
+  new val create(k: Array[U8] val, v: Array[U8] val) =>
+    key = String.from_array(k)
+    value = String.from_array(v)
+
+class ReadyForQueryMessage is ServerMessage
+  let status: TransactionStatus
+  new val create(b: U8) =>
+    status = _StatusFromByte(b)
+
+class BackendKeyDataMessage is ServerMessage
+  let data: (U32, U32)
+  new val create(pid: U32, key: U32) =>
+    data = (pid,key)
 
 type Param is (String, String)
 
@@ -107,6 +151,8 @@ actor Connection
   let _pool: ConnectionPool tag
   let _listener: Listener tag
   let _params: Array[Param] val
+  var _interaction: Interaction tag
+  var _backend_key: (U32, U32) = (0, 0)
   
   new create(auth: AmbientAuth,
              session: Session,
@@ -118,19 +164,32 @@ actor Connection
     _conn = TCPConnection(auth, PGNotify(this, _listener), host, service)
     _pool = pool
     _params = params
+    _interaction = AuthInteraction(_pool, this, _params)
 
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
 
   be connected() =>
-		log("connected")
-    let data = recover val
-    let msg = StartupMessage(_params)
-    msg.done() 
-    end
-    _conn.writev(data)
+    _interaction(this)
+
+  be _set_backend_key(m: BackendKeyDataMessage val) =>
+    Debug("set backend key")
+    _backend_key = m.data
 
   be log(msg: String) => _pool.log(msg)
+
+  be update_param(p: ParameterStatusMessage val) =>
+    // TODO
+    Debug.out("Update param " + p.key + " " + p.value)
+
+  be received(s: ServerMessage val) =>
+    match s
+    | let m: ParameterStatusMessage val => update_param(m)
+    | let m: ReadyForQueryMessage val => None
+    | let m: BackendKeyDataMessage val => _set_backend_key(m)
+    else
+      _interaction.message(s)
+    end
 
 
 actor ConnectionPool
@@ -139,12 +198,14 @@ actor ConnectionPool
   let _sess: Session tag
   let _host: String
   let _service: String
+  let _user: String
 
-  new create(session: Session tag, host: String, service: String, params: Array[Param] val) =>
+  new create(session: Session tag, host: String, service: String, user: String, params: Array[Param] val) =>
     _params = params
     _sess = session
     _host = host
     _service = service
+    _user = user
 
   be log(msg: String) =>
     _sess.log(msg)
@@ -153,17 +214,16 @@ actor ConnectionPool
     log("connecting")
     let conn = Connection(auth, _sess, _host, _service, _params, this) 
 
-  be got_pass(pass: String) =>
-    None
+  be got_pass(pass: String, f: PassCB iso) =>
+    f(pass)
 
-  be get_pass() =>
-    Debug.out("get_pass")
-    got_pass("hop")
+  be get_pass(f: PassCB iso) =>
+    // Debug.out("get_pass")
+    got_pass("macflytest", consume f)
+
+  be get_user(f: UserCB iso) =>
+    f(_user)
      
-
-type PGDo[B: Any #share] is Fulfill[Connection, B]
-type PGPromise is Promise[Connection]
-  
 
 actor Session
   let _env: Env
@@ -176,7 +236,7 @@ actor Session
              password: String = "",
              database: String = "") =>
     _env = env
-    _pool = ConnectionPool(this, host, service,
+    _pool = ConnectionPool(this, host, service, user,
       recover val [("user", user), ("database", database)] end)
 
   be log(msg: String) =>
@@ -190,152 +250,3 @@ actor Session
 
   be terminate()=> None
 
-/*
-class StartupHandler is Handler
-  let _base: HandlerBase delegate Handler
-  let _params: Array[Param] val
-
-  new create(p: ConnectionPoolOld, params: Array[Param] val) =>
-    _base = HandlerBase(p)
-    _params = params
-
-  fun ref connected(conn: TCPConnection ref) =>
-		log("connected")
-    let data = recover val
-    let msgi = StartupMessage(_params)
-    msgi.done() 
-    end
-    conn.writev(data)
-
-  fun ref received(conn: TCPConnection ref, data': Array[U8] iso) =>
-    match filter(consume data')
-    | None => None
-    | let r: ClearTextPwdRequest val =>
-      pool().get_pass(this)
-    | let r: MD5PwdRequest val  =>
-      pool().get_pass(this)
-    else
-      log("Unknown ServerMessage")
-    end
-  
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-actor ConnectionPoolOld
-  let _ready: Array[TCPConnection] = Array[TCPConnection tag]
-  let _params: Array[Param] val
-  let _auth: (AmbientAuth | None)
-  let _sess: Session
-  var _connections: MapIs[Handler tag, TCPConnection] = MapIs[Handler tag, TCPConnection]
-
-  new create(auth: (AmbientAuth | None), session: Session tag, params: Array[Param] val) =>
-    _auth = auth
-    _params = params
-    _sess = session
-
-  be handle(h: Handler iso, old: None = None) =>
-    let t: Handler tag = recover tag h end
-    try
-      let conn = TCPConnection(_auth as AmbientAuth, consume h, "", "5432")
-      _connections.insert(t, conn)
-    end
-
-  be handle(h: Handler iso, old: Handler tag) =>
-    try
-      let data: Array[ByteSeq] val = h.data()
-      /*for s in data.values() do*/
-        /*match s*/
-        /*| let s': Array[U8 val] val =>*/
-          /*for c in s'.values() do*/
-            /*log(c.string())*/
-          /*end*/
-        /*| let s': String =>*/
-          /*for c in s'.values() do*/
-            /*log(c.string())*/
-          /*end*/
-        /*end*/
-      /*end*/
-      let conn = _connections(old)
-      _connections.insert(h, conn)
-      conn.set_notify(consume h)
-      _connections.remove(old)
-      conn.writev(data)
-    end
-
-  be log(msg: String) =>
-    _sess.log(msg)
-
-  be connect() =>
-    None
-    /*let h: Handler iso = recover StartupHandler(this, _params) end*/
-    /*handle(consume h)*/
-
-  be got_pass(pass: String, h: Handler tag) =>
-    Debug.out("got_pass")
-    handle(recover PasswordHandler(this, pass) end, h)
-
-  be get_pass(h: Handler tag) =>
-    Debug.out("get_pass")
-    got_pass("hop", h)
-     
-
-trait Handler is TCPConnectionNotify
-  fun log(msg: String)
-  fun pool(): ConnectionPoolOld
-  fun ref data(): Array[ByteSeq] iso^
-  fun ref set_data(d: Array[ByteSeq] iso)
-  fun box filter(data': Array[U8] iso): (ServerMessage val | None)
-
-
-class HandlerBase is Handler
-  let _pool: ConnectionPoolOld
-  var _data: Array[ByteSeq] iso = recover Array[ByteSeq] end
-  
-  new create(pool': ConnectionPoolOld) => _pool = pool'
-  fun log(msg: String) => _pool.log(msg)
-  fun pool(): ConnectionPoolOld => _pool
-  fun ref data(): Array[ByteSeq] iso^ => _data = recover Array[ByteSeq] end
-  fun ref set_data(d: Array[ByteSeq] iso) => _data = consume d
-  fun box filter(data': Array[U8] iso): (ServerMessage val | None) =>
-    match ParseResponse(consume data')
-    | let r: ParseError val => log(r.msg)
-    | let r: ErrorMessage val =>
-      log("Error:")
-      for (typ, value) in r.items.values() do
-        log("  " + typ.string() + ": " + String.from_array(value))
-      end
-    | let r: ServerMessage val => r
-    end
-
-
-class PasswordHandler is Handler
-  let _base: HandlerBase delegate Handler
-
-  new create(p: ConnectionPoolOld, pass: String) =>
-    _base = HandlerBase(p)
-    set_data(PasswordMessage(pass).done())
-
-  fun ref received(conn: TCPConnection ref, data': Array[U8] iso) =>
-    match filter(consume data')
-    | None => None
-    | let r: ClearTextPwdRequest val =>
-      pool().get_pass(this)
-    | let r: MD5PwdRequest val  =>
-      pool().get_pass(this)
-    else
-      log("Unknown ServerMessage")
-    end
-
-*/
