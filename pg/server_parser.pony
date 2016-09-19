@@ -1,9 +1,10 @@
 use "buffered"
+use "collections"
 use "debug"
 
 trait ParseEvent
 primitive ParsePending is ParseEvent
-class ParseError is ParseEvent
+class PGParseError is ParseEvent
   let msg: String
 
   new iso create(msg': String)=>
@@ -12,12 +13,12 @@ class ParseError is ParseEvent
 
 
 actor Listener
-  let _conn: Connection
+  let _conn: _Connection
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
 
-  new create(c: Connection) =>
+  new create(c: _Connection) =>
     _conn = c
 
   be received(data: Array[U8] iso) =>
@@ -25,14 +26,14 @@ actor Listener
     r.append(data')
     while r.size() > _clen do
       match parse_response()
-      | let result: ParseError val => _conn.log(result.msg)
+      | let result: PGParseError val => _conn.log(result.msg)
       | let result: ErrorMessage val =>
         _conn.log("Error:")
         for (typ, value) in result.items.values() do
           _conn.log("  " + typ.string() + ": " + String.from_array(value))
         end
-      | let result: ParsePending val => Debug.out("pending")
-      | let result: ServerMessage val => Debug("sm");_conn.received(result)
+      | let result: ParsePending val => None
+      | let result: ServerMessage val => _conn.received(result)
       end
    end
 
@@ -45,36 +46,44 @@ actor Listener
     _clen = r.i32_be().usize()
 
   fun ref parse_response(): (ServerMessage val|ParseEvent val) =>
-    Debug.out("parse response:")
-    Debug.out(" _ctype: " + _ctype.string())
-    Debug.out(" _clen: " + _clen.string())
+    /*Debug.out("parse response:")*/
+    /*Debug.out(" _ctype: " + _ctype.string())*/
+    /*Debug.out(" _clen: " + _clen.string())*/
     try
       parse_type()
       parse_len()
     else
-      Debug.out(" Pending"); return ParsePending
+      Debug.out("  Pending"); return ParsePending
     end
-    Debug.out(" parse len and type: ")
+    /*Debug.out(" parse len and type: ")*/
     Debug.out("  _ctype: " + _ctype.string())
-    Debug.out("  _clen: " + _clen.string())
+    /*Debug.out("  _clen: " + _clen.string())*/
     if _clen > ( r.size() + 4) then
-      Debug.out(" Pending (_clen: " + _clen.string()
+      Debug.out("  Pending (_clen: " + _clen.string()
         + ", r.size: " + r.size().string() + ")" )
       return ParsePending
     end
     let result = match _ctype
-    | 69 => parse_err_resp()// E
+    | 67 => try
+        CommandCompleteMessage(parse_single_string()) // C
+      else
+        PGParseError("Couldn't parse cmd complete message")
+      end
+    | 68 => parse_data_row() //D
+    | 69 => parse_err_resp() // E
+    | 73 => EmptyQueryResponse // I
     | 75 => parse_backend_key_data() //k
     | 82 => try  // R
         parse_auth_resp()
       else
-        ParseError("Couldn't parse auth message")
+        PGParseError("Couldn't parse auth message")
       end
     | 83 => parse_parameter_status() // S
+    | 84 => parse_row_description() // T
     | 90 => parse_ready_for_query() // Z
     else
-      try r.block(_clen-4) else return ParseError("") end
-      let ret = ParseError("Unknown message ID " + _ctype.string())
+      try r.block(_clen-4) else return PGParseError("") end
+      let ret = PGParseError("Unknown message ID " + _ctype.string())
       _ctype = 0
       _clen = 0
       ret
@@ -86,33 +95,87 @@ actor Listener
     end
     result
 
+  fun ref parse_data_row(): ServerMessage val =>
+    try
+      let n_fields = r.u16_be()
+      let f = recover val
+        let fields: Array[FieldData val]= Array[FieldData val](n_fields.usize())
+        for n in Range(0, n_fields.usize()) do
+          let len = r.i32_be()
+          let data = recover val r.block(len.usize()) end
+          fields.push(recover val FieldData(len, data) end)
+        end
+        fields
+        end
+      DataRowMessage(f)
+    else
+      PGParseError("Unreachable")
+    end
+
+  fun ref parse_string(): String val ? =>
+    recover val
+      let s = String
+      while true do
+        let c = r.u8()
+        if c == 0 then break else s.push(c) end
+      end
+      s
+    end
+
+  fun ref parse_row_description(): ServerMessage val =>
+    let rd = RowDescription
+    try
+      let n_fields = r.u16_be()
+      for n in Range(0, n_fields.usize()) do
+        let name = parse_string()
+        let table_oid = r.i32_be()
+        let col_number = r.i16_be()
+        let type_oid = r.i32_be()
+        let type_size = r.i16_be()
+        let type_modifier = r.i32_be()
+        let format = r.i16_be()
+        rd.append(FieldDescription(name, table_oid, col_number,
+                                   type_oid, type_size,
+                                   type_modifier, format))
+      end
+      RowDescriptionMessage(recover val consume ref rd end)
+    else
+      PGParseError("Unreachable")
+    end
+
+  fun ref parse_single_string(): String ? =>
+   String.from_array(r.block(_clen - 4))
+
   fun ref parse_backend_key_data(): ServerMessage val =>
     try
       let pid = r.u32_be()
       let key = r.u32_be()
       BackendKeyDataMessage(pid, key)
     else
-      ParseError("Unreachable")
+      PGParseError("Unreachable")
     end
 
   fun ref parse_ready_for_query(): ServerMessage val =>
-    let b = try r.u8() else return ParseError("Unreachable") end
+    let b = try r.u8() else return PGParseError("Unreachable") end
     ReadyForQueryMessage(b)
 
   fun ref parse_parameter_status(): ServerMessage val =>
     let item = try
         recover val r.block(_clen-4).slice() end
       else
-        return ParseError("This should never happen")
+        return PGParseError("This should never happen")
       end
-    Debug.out(String.from_array(item))
-    let end_idx = try item.find(0) else return ParseError("Malformed parameter message") end
+    let end_idx = try
+        item.find(0)
+      else
+        return PGParseError("Malformed parameter message")
+      end
     ParameterStatusMessage(
       recover val item.trim(0, end_idx) end,
       recover val item.trim(end_idx + 1) end)
 
   fun ref parse_auth_resp(): ServerMessage val ?=>
-    Debug.out("parse_auth_resp")
+    /*Debug.out("parse_auth_resp")*/
     let msg_type = r.i32_be()
     /*Debug.out(msg_type)*/
     let result: ServerMessage val = match msg_type // auth message type
@@ -120,7 +183,7 @@ actor Listener
     | 3 => ClearTextPwdRequest
     | 5 => MD5PwdRequest(recover val [r.u8(), r.u8(), r.u8(), r.u8()] end)
     else 
-      ParseError("Unknown auth message")
+      PGParseError("Unknown auth message")
     end
     result
 
@@ -132,13 +195,13 @@ actor Listener
     let it = recover val
       let items = Array[(U8, Array[U8] val)]
       let fields' = try r.block(_clen - 4) else
-        return ParseError("")
+        return PGParseError("")
       end
       let fields = recover val (consume fields').slice() end
       var pos: USize = 1
       var start_pos = pos
       let iter = fields.values()
-      var c = try iter.next() else return ParseError("Bad error format") end
+      var c = try iter.next() else return PGParseError("Bad error format") end
       var typ = c
       repeat
         //Debug.out(c)

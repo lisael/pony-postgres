@@ -7,12 +7,32 @@ use "net"
 use "buffered"
 use "collections"
 use "promises"
+use "options"
 use "debug"
 
 interface StringCB
   fun apply(s: String)
 interface PassCB is StringCB
 interface UserCB is StringCB
+
+class Rows
+  let _rows: Array[Array[FieldData val] val] = Array[Array[FieldData val]val]
+  let _desc: RowDescription val
+
+  new create(d: RowDescription val) => _desc = d
+
+  fun ref append(d: Array[FieldData val]val) => _rows.push(d)
+
+  fun values(): Iterator[Array[FieldData val] val] => _rows.values()
+
+
+
+interface RowsCB
+  fun apply(iter: Rows)
+
+
+type Param is (String, String)
+
 
 primitive IdleTransction
 primitive ActiveTransaction
@@ -34,6 +54,7 @@ primitive _StatusFromByte
       UnknownTransactionStatus
     end
 
+
 trait Message
 interface ClientMessage is Message
   fun ref _zero()
@@ -41,7 +62,6 @@ interface ClientMessage is Message
   fun ref _i32(i: I32)
   fun ref _done(id: U8): Array[ByteSeq] iso^
   fun ref done(): Array[ByteSeq] iso^ => _done(0)
-
 
 class ClientMessageBase is ClientMessage
   var _w: Writer = Writer
@@ -57,13 +77,11 @@ class ClientMessageBase is ClientMessage
     _out.writev(_w.done())
     _out.done()
 
-
 class NullClientMessage is ClientMessage
   fun ref _zero() => None
   fun ref _write(s: String)  => None
   fun ref _i32(i: I32) => None
   fun ref _done(id: U8): Array[ByteSeq] iso^ => recover Array[ByteSeq] end
-
 
 class StartupMessage is ClientMessage
   let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
@@ -74,25 +92,25 @@ class StartupMessage is ClientMessage
       add_param(key, value)
     end
 
-  fun ref done(): Array[ByteSeq] iso^ => Debug.out("####"); _zero(); _done(0)
+  fun ref done(): Array[ByteSeq] iso^ => _zero(); _done(0)
 
   fun ref add_param(key: String, value: String) =>
     _write(key); _zero()
     _write(value); _zero()
 
-
 class TerminateMessage
   let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
-
+  fun ref done(): Array[ByteSeq] iso^ => _done(88) // X
 
 class PasswordMessage is ClientMessage
   let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  new create(pass: String) => _write(pass)
+  fun ref done(): Array[ByteSeq] iso^ => _done(112) //p
 
-  new create(pass: String) =>
-    _write(pass)
-    
-  fun ref done(): Array[ByteSeq] iso^ => _done(112)
-
+class QueryMessage is ClientMessage
+  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  new create(q: String) => _write(q)
+  fun ref done(): Array[ByteSeq] iso^ =>_zero(); _done(81) // Q
 
 
 interface ServerMessage is Message
@@ -104,10 +122,12 @@ class NullServerMessage is ServerMessage
 // messages descirbed in https://www.postgresql.org/docs/current/static/protocol-message-formats.html
 class AuthenticationOkMessage is ServerMessage
 class ClearTextPwdRequest is ServerMessage
+class EmptyQueryResponse is ServerMessage
 class MD5PwdRequest is ServerMessage
   let salt: Array[U8] val
   new val create(salt': Array[U8] val)=>
     salt = salt'
+
 class ErrorMessage is ServerMessage
   let items: Array[(U8, Array[U8] val)] val
   new val create(it: Array[(U8, Array[U8] val)] val) =>
@@ -130,13 +150,23 @@ class BackendKeyDataMessage is ServerMessage
   new val create(pid: U32, key: U32) =>
     data = (pid,key)
 
-type Param is (String, String)
+class CommandCompleteMessage is ServerMessage
+  let command: String
+  new val create(c: String) => command = c
+
+class RowDescriptionMessage is ServerMessage
+  let row: RowDescription val
+  new val create(rd: RowDescription val) => row = rd
+
+class DataRowMessage is ServerMessage
+  let fields: Array[FieldData val] val
+  new val create(f: Array[FieldData val] val) => fields = f
 
 class PGNotify is TCPConnectionNotify
-  let _conn: Connection
+  let _conn: _Connection
   let _listener: Listener
 
-  new iso create(c: Connection, l: Listener) =>
+  new iso create(c: _Connection, l: Listener) =>
     _conn = c
     _listener = l
 
@@ -146,12 +176,13 @@ class PGNotify is TCPConnectionNotify
   fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
     _listener.received(consume data)
 
-actor Connection
+actor _Connection
   let _conn: TCPConnection tag
-  let _pool: ConnectionPool tag
+  let _pool: _ConnectionPool tag
   let _listener: Listener tag
   let _params: Array[Param] val
-  var _interaction: Interaction tag
+  var _convs: List[_Conversation tag] = List[_Conversation tag]
+  var _current: _Conversation tag
   var _backend_key: (U32, U32) = (0, 0)
   
   new create(auth: AmbientAuth,
@@ -159,18 +190,30 @@ actor Connection
              host: String,
              service: String,
              params: Array[Param] val,
-             pool: ConnectionPool) =>
+             pool: _ConnectionPool) =>
     _listener = Listener(this)
     _conn = TCPConnection(auth, PGNotify(this, _listener), host, service)
     _pool = pool
     _params = params
-    _interaction = AuthInteraction(_pool, this, _params)
+    _current = _AuthConversation(_pool, this, _params)
 
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
 
+  fun ref _schedule(conv: _Conversation tag) =>
+    match _current
+    | let n: _NullConversation =>
+      _current = conv
+      _current(this)
+    else
+      _convs.push(conv)
+    end
+
+  be schedule(conv: _Conversation tag) =>
+    _schedule(conv)
+
   be connected() =>
-    _interaction(this)
+    _current(this)
 
   be _set_backend_key(m: BackendKeyDataMessage val) =>
     Debug("set backend key")
@@ -178,29 +221,54 @@ actor Connection
 
   be log(msg: String) => _pool.log(msg)
 
+  be next() =>
+    try
+      _current = _convs.shift()
+      _current(this)
+    else
+      _current = _NullConversation
+    end
+
   be update_param(p: ParameterStatusMessage val) =>
-    // TODO
+    // TODO: update the parameters and allow the user to query them
     Debug.out("Update param " + p.key + " " + p.value)
 
   be received(s: ServerMessage val) =>
     match s
     | let m: ParameterStatusMessage val => update_param(m)
-    | let m: ReadyForQueryMessage val => None
     | let m: BackendKeyDataMessage val => _set_backend_key(m)
     else
-      _interaction.message(s)
+      _current.message(s)
     end
 
+  be raw(q: String, handler: RowsCB val) =>
+    Debug.out("got raw: " + q)
+    schedule(_QueryConversation(q, this, handler))
 
-actor ConnectionPool
-  let _connections: Array[Connection] = Array[Connection tag]
+
+actor Connection
+  let _conn: _Connection tag
+
+  new _create(c: _Connection) =>
+    _conn = c
+
+  be raw(q: String, handler: RowsCB val) =>
+    _conn.raw(q, handler)
+
+actor _ConnectionPool
+  let _connections: Array[_Connection] = Array[_Connection tag]
   let _params: Array[Param] val
   let _sess: Session tag
   let _host: String
   let _service: String
   let _user: String
 
-  new create(session: Session tag, host: String, service: String, user: String, params: Array[Param] val) =>
+  new create(session: Session tag,
+             host: String,
+             service: String,
+             user: String,
+             password: (String | None) = None,
+             params: Array[Param] val) =>
     _params = params
     _sess = session
     _host = host
@@ -210,15 +278,15 @@ actor ConnectionPool
   be log(msg: String) =>
     _sess.log(msg)
 
-  be connect(auth: AmbientAuth) =>
-    log("connecting")
-    let conn = Connection(auth, _sess, _host, _service, _params, this) 
+  be connect(auth: AmbientAuth, f: {(Connection tag)} iso) =>
+    let conn = Connection._create(_Connection(auth, _sess, _host, _service, _params, this))
+    f(conn)
 
   be got_pass(pass: String, f: PassCB iso) =>
     f(pass)
 
   be get_pass(f: PassCB iso) =>
-    // Debug.out("get_pass")
+    // TODO: implement a versatile get_pass function
     got_pass("macflytest", consume f)
 
   be get_user(f: UserCB iso) =>
@@ -227,24 +295,34 @@ actor ConnectionPool
 
 actor Session
   let _env: Env
-  let _pool: ConnectionPool
+  let _pool: _ConnectionPool
 
   new create(env: Env,
              host: String="",
              service: String="5432",
-             user: String="",
-             password: String = "",
+             user: (String | None) = None,
+             password: (String | None) = None,
              database: String = "") =>
     _env = env
-    _pool = ConnectionPool(this, host, service, user,
-      recover val [("user", user), ("database", database)] end)
+    let user' = try user as String else
+      try EnvVars(env.vars())("USER") else "" end
+    end
+    _pool = _ConnectionPool(this, host, service, user', password, 
+      recover val [("user", user'), ("database", database)] end)
 
   be log(msg: String) =>
     _env.out.print(msg)
 
   be connect() =>
     """Create a connection and try to log in"""
-    try _pool.connect(_env.root as AmbientAuth) end
+    None
+    /*try _pool.connect(_env.root as AmbientAuth) end*/
+
+  be raw(q: String, handler: RowsCB val) =>
+    try
+      let f = recover lambda(c: Connection)(q, handler) => c.raw(q, handler) end end
+      _pool.connect(_env.root as AmbientAuth, consume f)
+    end
 
   be connected() => None
 
