@@ -12,6 +12,7 @@ use "debug"
 
 use "pg/protocol"
 use "pg/introspect"
+use "pg/connection"
 
 interface StringCB
   fun apply(s: String)
@@ -32,128 +33,12 @@ class Rows
 interface RowsCB
   fun apply(iter: Rows)
 
-
 type Param is (String, String)
 
-
-
-
-class PGNotify is TCPConnectionNotify
-  let _conn: _Connection
-  let _listener: Listener
-
-  new iso create(c: _Connection, l: Listener) =>
-    _conn = c
-    _listener = l
-
-  fun ref connected(conn: TCPConnection ref) =>
-    _conn.connected()
-
-  fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
-    _listener.received(consume data)
-
-  fun ref closed(conn: TCPConnection ref) =>
-    _listener.received(recover [as U8: 0, 0, 0, 0, 0]end)
-    _conn.received(ConnectionClosedMessage)
-
-actor _Connection
-  let _conn: TCPConnection tag
-  var _fe: (Connection tag | None) = None // front-end connection
-  let _pool: _ConnectionPool tag
-  let _listener: Listener tag
-  let _params: Array[Param] val
-  var _convs: List[_Conversation tag] = List[_Conversation tag]
-  var _current: _Conversation tag
-  var _backend_key: (U32, U32) = (0, 0)
-  
-  new create(auth: AmbientAuth,
-             session: Session,
-             host: String,
-             service: String,
-             params: Array[Param] val,
-             pool: _ConnectionPool) =>
-    _listener = Listener(this)
-    _conn = TCPConnection(auth, PGNotify(this, _listener), host, service)
-    _pool = pool
-    _params = params
-    _current = _AuthConversation(_pool, this, _params)
-
-  be writev(data: ByteSeqIter) =>
-    _conn.writev(data)
-
-  fun ref _schedule(conv: _Conversation tag) =>
-    match _current
-    | let n: _NullConversation =>
-      _current = conv
-      _current(this)
-    else
-      _convs.push(conv)
-    end
-
-  be schedule(conv: _Conversation tag) =>
-    _schedule(conv)
-
-  be connected() =>
-    _current(this)
-
-  be _set_backend_key(m: BackendKeyDataMessage val) =>
-    Debug("set backend key")
-    _backend_key = m.data
-
-  be log(msg: String) => _pool.log(msg)
-
-  be next() =>
-    try
-      _current = _convs.shift()
-      _current(this)
-    else
-      _current = _NullConversation(this)
-    end
-
-  be update_param(p: ParameterStatusMessage val) =>
-    // TODO: update the parameters and allow the user to query them
-    Debug.out("Update param " + p.key + " " + p.value)
-
-  be received(s: ServerMessage val) =>
-    _current.message(s)
-
-  be _log_error(m: ErrorMessage val) =>
-    for (tagg, text) in m.items.values() do
-      let s: String trn = recover trn String(text.size() + 3) end
-      s.push(tagg)
-      s.append(": ")
-      s.append(text)
-      log(consume s)
-    end
-
-  be handle_message(s: ServerMessage val) =>
-    match s
-    | let m: ParameterStatusMessage val => update_param(m)
-    | let m: BackendKeyDataMessage val => _set_backend_key(m)
-    | let m: ErrorMessage val => _log_error(m)
-    | let m: ConnectionClosedMessage val => log("Disconected")
-    else
-      log("Unknown ServerMessage")
-    end
-
-  be raw(q: String, handler: RowsCB val) =>
-    schedule(_QueryConversation(q, this, handler))
-
-  be terminate() =>
-    schedule(_TerminateConversation(this))
-
-  be do_terminate() =>
-    Debug.out("######")
-    try (_fe as Connection).do_terminate() end
-
-  be set_frontend(c: Connection tag) =>
-    _fe = c
-
-
 actor Connection
-  let _conn: _Connection tag
+  let _conn: BEConnection tag
 
-  new _create(c: _Connection) =>
+  new create(c: BEConnection tag) =>
     _conn = c
 
   be raw(q: String, handler: RowsCB val) =>
@@ -162,50 +47,6 @@ actor Connection
   be do_terminate() =>
     Debug.out("Bye")
 
-actor _ConnectionPool
-  let _connections: Array[_Connection] = Array[_Connection tag]
-  let _params: Array[Param] val
-  let _sess: Session tag
-  let _host: String
-  let _service: String
-  let _user: String
-  let _passwd_provider: PasswordProvider tag
-  var _password: (String | None) = None
-
-  new create(session: Session tag,
-             host: String,
-             service: String,
-             user: String,
-             passwd_provider: PasswordProvider tag,
-             params: Array[Param] val) =>
-    _params = params
-    _sess = session
-    _host = host
-    _service = service
-    _passwd_provider = passwd_provider
-    _user = user
-
-  be log(msg: String) =>
-    _sess.log(msg)
-
-  be connect(auth: AmbientAuth, f: {(Connection tag)} iso) =>
-    let priv_conn=_Connection(auth, _sess, _host, _service, _params, this)
-    _connections.push(priv_conn)
-    let conn = Connection._create(priv_conn)
-    priv_conn.set_frontend(conn)
-    f(conn)
-
-  be get_pass(f: PassCB iso) =>
-    // TODO: implement a versatile get_pass function
-    _passwd_provider(consume f)
-
-  be get_user(f: UserCB iso) =>
-    f(_user)
-
-  be terminate() =>
-    for i in Range(0, _connections.size()) do
-      try _connections.pop().terminate() end
-    end
      
 interface PasswordProvider
   be apply(f: PassCB val)
@@ -233,7 +74,7 @@ actor EnvPasswordProvider
 
 actor Session
   let _env: Env
-  let _mgr: _ConnectionPool
+  let _mgr: ConnectionManager
 
   new create(env: Env,
              host: String="",
@@ -256,7 +97,7 @@ actor Session
         RawPasswordProvider("")
       end
 
-    _mgr = _ConnectionPool(this, host, service, user', provider, 
+    _mgr = ConnectionManager(this, host, service, user', provider, 
       recover val [("user", user'), ("database", database)] end)
 
   be log(msg: String) =>

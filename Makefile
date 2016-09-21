@@ -43,13 +43,13 @@ $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
 $(BIN): $(PONY_SRC) 
-	$(PONYC) -o $(BIN_DIR) -p . $(PKG)/example
+	$(PONYC) -o $(BIN_DIR) -p . example
 
 $(DEBUG_DIR):
 	mkdir -p $(DEBUG_DIR)
 
 $(DEBUG): $(PONY_SRC) 
-	$(PONYC) --debug -p . -o $(DEBUG_DIR) $(PKG)/example
+	$(PONYC) --debug -p . -o $(DEBUG_DIR) example
 
 doc: $(PONY_SRC) ## Build the documentation 
 	$(PONYC) -o $(BUILD_DIR) --docs --path . --pass=docs $(PKG)

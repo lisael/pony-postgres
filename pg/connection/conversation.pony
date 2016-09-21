@@ -2,6 +2,7 @@ use "debug"
 use "crypto"
 
 use "pg/protocol"
+use "pg"
 
 trait _Conversation
   
@@ -18,10 +19,10 @@ actor _NullConversation is _Conversation
 
 
 actor _AuthConversation is _Conversation
-  let _pool: _ConnectionPool
-  let _params: Array[Param] val
+  let _pool: ConnectionManager
+  let _params: Array[(String, String)] val
   let _conn: _Connection
-  new create(p: _ConnectionPool, c: _Connection, params: Array[Param] val) =>
+  new create(p: ConnectionManager, c: _Connection, params: Array[(String, String)] val) =>
     _pool=p
     _conn=c
     _params=params
