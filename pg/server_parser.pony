@@ -2,6 +2,9 @@ use "buffered"
 use "collections"
 use "debug"
 
+use "pg/protocol"
+use "pg/introspect"
+
 trait ParseEvent
 primitive ParsePending is ParseEvent
 class PGParseError is ParseEvent

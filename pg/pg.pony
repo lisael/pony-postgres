@@ -10,6 +10,9 @@ use "promises"
 use "options"
 use "debug"
 
+use "pg/protocol"
+use "pg/introspect"
+
 interface StringCB
   fun apply(s: String)
 interface PassCB is StringCB
@@ -33,134 +36,7 @@ interface RowsCB
 type Param is (String, String)
 
 
-primitive IdleTransction
-primitive ActiveTransaction
-primitive ErrorTransaction
-primitive UnknownTransactionStatus
 
-type TransactionStatus is (IdleTransction
-                          | ActiveTransaction
-                          | ErrorTransaction
-                          | UnknownTransactionStatus)
-
-primitive _StatusFromByte
-  fun apply(b: U8): TransactionStatus =>
-    match b
-    | 'I' => IdleTransction
-    | 'T' => ActiveTransaction
-    | 'E' => ErrorTransaction
-    else
-      UnknownTransactionStatus
-    end
-
-
-trait Message
-interface ClientMessage is Message
-  fun ref _zero()
-  fun ref _write(s: String) 
-  fun ref _i32(i: I32)
-  fun ref _done(id: U8): Array[ByteSeq] iso^
-  fun ref done(): Array[ByteSeq] iso^ => _done(0)
-
-class ClientMessageBase is ClientMessage
-  var _w: Writer = Writer
-  var _out: Writer = Writer
-
-  fun ref _zero() => _w.u8(0)
-  fun ref _u8(u: U8) => _w.u8(u)
-  fun ref _write(s: String) => _w.write(s)
-  fun ref _i32(i: I32) => _w.i32_be(i)
-  fun ref _done(id: U8): Array[ByteSeq] iso^ =>
-    if id != 0 then _out.u8(id) end
-    _out.i32_be(_w.size().i32() + 4)
-    _out.writev(_w.done())
-    _out.done()
-
-class NullClientMessage is ClientMessage
-  fun ref _zero() => None
-  fun ref _write(s: String)  => None
-  fun ref _i32(i: I32) => None
-  fun ref _done(id: U8): Array[ByteSeq] iso^ => recover Array[ByteSeq] end
-
-class StartupMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
-
-  new create(params: Array[Param] box) =>
-    _i32(196608) // protocol version 3.0
-    for (key, value) in params.values() do
-      add_param(key, value)
-    end
-
-  fun ref done(): Array[ByteSeq] iso^ => _zero(); _done(0)
-
-  fun ref add_param(key: String, value: String) =>
-    _write(key); _zero()
-    _write(value); _zero()
-
-class TerminateMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
-  fun ref done(): Array[ByteSeq] iso^ => _done('X') 
-
-class PasswordMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
-  new create(pass: String) => _write(pass)
-  fun ref done(): Array[ByteSeq] iso^ => _done('p') 
-
-class QueryMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
-  new create(q: String) => _write(q)
-  fun ref done(): Array[ByteSeq] iso^ =>_zero(); _done('Q') 
-
-
-interface ServerMessage is Message
-
-// pseudo messages
-class ServerMessageBase is ServerMessage
-class NullServerMessage is ServerMessage
-class ConnectionClosedMessage is ServerMessage
-
-// messages descirbed in https://www.postgresql.org/docs/current/static/protocol-message-formats.html
-class AuthenticationOkMessage is ServerMessage
-class ClearTextPwdRequest is ServerMessage
-class EmptyQueryResponse is ServerMessage
-class MD5PwdRequest is ServerMessage
-  let salt: Array[U8] val
-  new val create(salt': Array[U8] val)=>
-    salt = salt'
-
-class ErrorMessage is ServerMessage
-  let items: Array[(U8, Array[U8] val)] val
-  new val create(it: Array[(U8, Array[U8] val)] val) =>
-    items = it
-
-class ParameterStatusMessage is ServerMessage
-  let key: String val
-  let value: String val
-  new val create(k: Array[U8] val, v: Array[U8] val) =>
-    key = String.from_array(k)
-    value = String.from_array(v)
-
-class ReadyForQueryMessage is ServerMessage
-  let status: TransactionStatus
-  new val create(b: U8) =>
-    status = _StatusFromByte(b)
-
-class BackendKeyDataMessage is ServerMessage
-  let data: (U32, U32)
-  new val create(pid: U32, key: U32) =>
-    data = (pid,key)
-
-class CommandCompleteMessage is ServerMessage
-  let command: String
-  new val create(c: String) => command = c
-
-class RowDescriptionMessage is ServerMessage
-  let row: RowDescription val
-  new val create(rd: RowDescription val) => row = rd
-
-class DataRowMessage is ServerMessage
-  let fields: Array[FieldData val] val
-  new val create(f: Array[FieldData val] val) => fields = f
 
 class PGNotify is TCPConnectionNotify
   let _conn: _Connection

@@ -1,6 +1,8 @@
 use "debug"
 use "crypto"
 
+use "pg/protocol"
+
 trait _Conversation
   
   be apply(c: _Connection) 
