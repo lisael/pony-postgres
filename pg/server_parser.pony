@@ -27,22 +27,17 @@ actor Listener
     while r.size() > _clen do
       match parse_response()
       | let result: PGParseError val => _conn.log(result.msg)
-      | let result: ErrorMessage val =>
-        _conn.log("Error:")
-        for (typ, value) in result.items.values() do
-          _conn.log("  " + typ.string() + ": " + String.from_array(value))
-        end
-      | let result: ParsePending val => None
+      | let result: ParsePending val => return
       | let result: ServerMessage val => _conn.received(result)
       end
    end
 
-  fun ref parse_type(): U8 ? =>
-    if _ctype > 0 then return _ctype end
+  fun ref parse_type() ? =>
+    if _ctype > 0 then return end
     _ctype = r.u8()
 
-  fun ref parse_len(): USize ? =>
-    if _clen > 0 then return _clen end
+  fun ref parse_len() ? =>
+    if _clen > 0 then return end
     _clen = r.i32_be().usize()
 
   fun ref parse_response(): (ServerMessage val|ParseEvent val) =>
@@ -64,23 +59,19 @@ actor Listener
       return ParsePending
     end
     let result = match _ctype
-    | 67 => try
-        CommandCompleteMessage(parse_single_string()) // C
+    | 'C' => try
+        CommandCompleteMessage(parse_single_string())
       else
         PGParseError("Couldn't parse cmd complete message")
       end
-    | 68 => parse_data_row() //D
-    | 69 => parse_err_resp() // E
-    | 73 => EmptyQueryResponse // I
-    | 75 => parse_backend_key_data() //k
-    | 82 => try  // R
-        parse_auth_resp()
-      else
-        PGParseError("Couldn't parse auth message")
-      end
-    | 83 => parse_parameter_status() // S
-    | 84 => parse_row_description() // T
-    | 90 => parse_ready_for_query() // Z
+    | 'D' => parse_data_row()
+    | 'E' => parse_err_resp()
+    | 'I' => EmptyQueryResponse
+    | 'K' => parse_backend_key_data()
+    | 'R' => parse_auth_resp()
+    | 'S' => parse_parameter_status()
+    | 'T' => parse_row_description()
+    | 'Z' => parse_ready_for_query()
     else
       try r.block(_clen-4) else return PGParseError("") end
       let ret = PGParseError("Unknown message ID " + _ctype.string())
@@ -174,24 +165,27 @@ actor Listener
       recover val item.trim(0, end_idx) end,
       recover val item.trim(end_idx + 1) end)
 
-  fun ref parse_auth_resp(): ServerMessage val ?=>
+  fun ref parse_auth_resp(): ServerMessage val =>
     /*Debug.out("parse_auth_resp")*/
-    let msg_type = r.i32_be()
-    /*Debug.out(msg_type)*/
-    let result: ServerMessage val = match msg_type // auth message type
-    | 0 => AuthenticationOkMessage
-    | 3 => ClearTextPwdRequest
-    | 5 => MD5PwdRequest(recover val [r.u8(), r.u8(), r.u8(), r.u8()] end)
-    else 
-      PGParseError("Unknown auth message")
+    try
+      let msg_type = r.i32_be()
+      /*Debug.out(msg_type)*/
+      let result: ServerMessage val = match msg_type // auth message type
+      | 0 => AuthenticationOkMessage
+      | 3 => ClearTextPwdRequest
+      | 5 => MD5PwdRequest(recover val [r.u8(), r.u8(), r.u8(), r.u8()] end)
+      else 
+        PGParseError("Unknown auth message")
+      end
+      result
+    else
+      PGParseError("Unreachable")
     end
-    result
 
   fun ref parse_err_resp(): ServerMessage val =>
     // TODO: This is ugly. it used to work with other
     // capabilities, so I adapted to get a val fields. It copies 
     // all, it should not.
-    Debug.out("parse_err_resp")
     let it = recover val
       let items = Array[(U8, Array[U8] val)]
       let fields' = try r.block(_clen - 4) else

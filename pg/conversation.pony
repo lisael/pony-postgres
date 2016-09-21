@@ -7,9 +7,12 @@ trait _Conversation
   be message(m: ServerMessage val)
 
 actor _NullConversation is _Conversation
-  
+  let _conn: _Connection
+
+  new create(c: _Connection) => _conn = c
   be apply(c: _Connection) => None
-  be message(m: ServerMessage val)=> None
+  be message(m: ServerMessage val) =>
+    _conn.handle_message(m)
 
 
 actor _AuthConversation is _Conversation
@@ -35,6 +38,7 @@ actor _AuthConversation is _Conversation
     _conn.writev(recover val PasswordMessage(pass).done() end)
 
   be send_md5_pass(pass: String, username: String, salt: Array[U8] val) =>
+    // TODO: Make it work. doesn't work at the moment
     // from PG doc : concat('md5', md5(concat(md5(concat(password, username)), random-salt)))
     var result = "md5" + ToHexString(
       MD5(
@@ -50,17 +54,17 @@ actor _AuthConversation is _Conversation
     let that = recover tag this end
     _pool.get_user(recover lambda(u: String)(that, pass, req) => that.send_md5_pass(pass, u, req.salt) end end)
 
-  be message(m: ServerMessage val) =>
+  be message(m: ServerMessage val!) =>
     let that = recover tag this end
     match m
-    | let r: ClearTextPwdRequest val =>
+    | let r: ClearTextPwdRequest val! =>
       _pool.get_pass(recover lambda(s: String)(that) => that.send_clear_pass(s) end end)
     | let r: MD5PwdRequest val  =>
       _pool.get_pass(recover lambda(s: String)(that, r) => that.got_md5_pass(s, r) end end)
     | let r: AuthenticationOkMessage val => None
     | let r: ReadyForQueryMessage val => _conn.next()
     else
-      log("Unknown ServerMessage")
+      _conn.handle_message(m)
     end
 
 actor _QueryConversation is _Conversation
@@ -94,5 +98,23 @@ actor _QueryConversation is _Conversation
     | let r: RowDescriptionMessage val => _rows = Rows(r.row)
     | let r: DataRowMessage val => row(r)
     else
-      log("Unknown ServerMessage")
+      _conn.handle_message(m)
+    end
+
+actor _TerminateConversation is _Conversation
+  let _conn: _Connection
+
+  new create(c: _Connection) =>
+    _conn = c
+
+  be log(msg: String) => _conn.log(msg)
+
+  be apply(c: _Connection) =>
+    c.writev(recover val TerminateMessage.done() end)
+
+  be message(m: ServerMessage val)=>
+    match m
+    | let r: ConnectionClosedMessage val => _conn.do_terminate()
+    else
+      _conn.handle_message(m)
     end

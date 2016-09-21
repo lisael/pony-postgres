@@ -11,7 +11,7 @@ actor Main
   let sess: Session
 
   new create(env: Env) =>
-    sess = Session(env where user="macflytest", password="macflytest", database="macflytest")
+    sess = Session(env where user="macflytest", password=EnvPasswordProvider(env), database="macflytest")
     sess.raw("SELECT 42, 24;;", recover val
       lambda(r: Rows)(env, sess) =>
         env.out.print("Yay")

@@ -24,7 +24,7 @@ class FieldDescription
 
 
 class RowDescription
-  let fields:   Array[FieldDescription val]= Array[FieldDescription val]
+  let fields: Array[FieldDescription val]= Array[FieldDescription val]
 
   fun ref append(f: FieldDescription val) => fields.push(f)
 
