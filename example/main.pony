@@ -13,15 +13,14 @@ actor Main
   new create(env: Env) =>
     sess = Session(env where user="macflytest", password=EnvPasswordProvider(env), database="macflytest")
     sess.raw("SELECT 42, 24;;", recover val
-      lambda(r: Rows)(env, sess) =>
-        env.out.print("Yay")
-        for row in r.values() do
-          for field in row.values() do
-            Debug.out(field.len)
-            try
-              Debug.out(field.data(0))
-              Debug.out(field.data(1))
-            end
+      lambda(rows: Rows)(env, sess) =>
+        for d in rows.desc.fields.values() do
+          Debug.out(d.type_oid)
+          Debug.out(d.name)
+        end
+        for row in rows.values() do
+          for value in row.values() do
+            try Debug.out(value as I32) else Debug.out("error...") end
           end
         end
         sess.terminate()

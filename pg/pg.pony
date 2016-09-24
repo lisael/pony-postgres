@@ -13,21 +13,47 @@ use "debug"
 use "pg/protocol"
 use "pg/introspect"
 use "pg/connection"
+use "pg/codec"
+
 
 interface StringCB
   fun apply(s: String)
 interface PassCB is StringCB
 interface UserCB is StringCB
 
-class Rows
-  let _rows: Array[Array[FieldData val] val] = Array[Array[FieldData val]val]
+
+class PGValueIterator is Iterator[Array[PGValue val]]
+  let _it: Iterator[Array[FieldData val] val]
   let _desc: RowDescription val
 
-  new create(d: RowDescription val) => _desc = d
+  new create(it: Iterator[Array[FieldData val] val] ref, desc: RowDescription val) =>
+    _it = it
+    _desc = desc
 
+  fun ref has_next(): Bool => _it.has_next()
+
+  fun ref next(): Array[PGValue] ? =>
+    let result = Array[PGValue](_desc.fields.size())
+    var idx = USize(0)
+    for value in _it.next().values() do
+      let typ = _desc.fields(idx).type_oid
+      let fmt = _desc.fields(idx).format
+      idx = idx + 1
+      result.push(Decode(typ, value.data, fmt))
+    end
+    result
+
+class Rows
+  let _rows: Array[Array[FieldData val] val] = Array[Array[FieldData val]val]
+  let desc: RowDescription val
+
+  new create(d: RowDescription val) => desc = d
   fun ref append(d: Array[FieldData val]val) => _rows.push(d)
-
-  fun values(): Iterator[Array[FieldData val] val] => _rows.values()
+  fun fields(): Iterator[Array[FieldData val] val] => _rows.values()
+  fun values(): Iterator[Array[PGValue val]] =>
+    let it = _rows.slice().values()
+    PGValueIterator(consume it, desc)
+  //fun as_maps()
 
 
 interface RowsCB
