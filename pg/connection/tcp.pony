@@ -24,7 +24,8 @@ class PGNotify is TCPConnectionNotify
     _listener.received(consume data)
 
   fun ref closed(conn: TCPConnection ref) =>
-    _listener.received(recover [as U8: 0, 0, 0, 0, 0]end)
+    /*_listener.received(recover [as U8: 0, 0, 0, 0, 0]end)*/
+    _listener.terminate()
     _conn.received(ConnectionClosedMessage)
 
 actor _Connection

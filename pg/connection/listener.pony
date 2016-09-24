@@ -14,12 +14,12 @@ class PGParseError is ParseEvent
     msg = msg'
 
 
-
 actor Listener
   let _conn: _Connection
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
+  var _terminating: Bool = false
 
   new create(c: _Connection) =>
     _conn = c
@@ -30,10 +30,16 @@ actor Listener
     while r.size() > _clen do
       match parse_response()
       | let result: PGParseError val => _conn.log(result.msg)
-      | let result: ParsePending val => return
+      | let result: ParsePending val => if _terminating and (_ctype == 'E') then
+          r.append(recover Array[U8].init(0, _clen - r.size()) end)
+        else
+          return
+        end
       | let result: ServerMessage val => _conn.received(result)
       end
    end
+
+  be terminate() => _terminating = true
 
   fun ref parse_type() ? =>
     if _ctype > 0 then return end
