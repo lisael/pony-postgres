@@ -126,7 +126,7 @@ class CloseMessage is ClientMessage
 class ParseMessage is ClientMessage
   let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
 
-  new create(query: String, name: String, param_types: Array[I32]) =>
+  new create(query: String, name: String, param_types: Array[I32] val) =>
     _write(name)
     _zero()
     _write(query)

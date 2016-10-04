@@ -29,7 +29,7 @@ class PGNotify is TCPConnectionNotify
     _conn.connected()
 
   fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
-    Debug.out("received")
+    // Debug.out("received")
     _listener.received(consume data)
 
   fun ref closed(conn: TCPConnection ref) =>
@@ -37,14 +37,14 @@ class PGNotify is TCPConnectionNotify
     _listener.terminate()
     _conn.received(ConnectionClosedMessage)
 
-  fun ref sent(conn: TCPConnection ref, data: (String val | Array[U8 val] val)): (String val | Array[U8 val] val) =>
-    Debug.out("send")
-    match data
-    | let s: String val => for c in s.values() do Debug.out(c) end
-    | let s: Array[U8 val] val => for c in s.values() do Debug.out(c) end
-    end
-    conn.write_final(data)
-    ""
+  /*fun ref sent(conn: TCPConnection ref, data: (String val | Array[U8 val] val)): (String val | Array[U8 val] val) =>*/
+    /*Debug.out("send")*/
+    /*match data*/
+    /*| let s: String val => for c in s.values() do Debug.out(c) end*/
+    /*| let s: Array[U8 val] val => for c in s.values() do Debug.out(c) end*/
+    /*end*/
+    /*conn.write_final(data)*/
+    /*""*/
 
 actor _Connection is BEConnection
   let _conn: TCPConnection tag
@@ -110,7 +110,7 @@ actor _Connection is BEConnection
     None
 
   be received(s: ServerMessage val) =>
-    Debug.out("recieved " + s.string())
+    // Debug.out("recieved " + s.string())
     _current.message(s)
 
   be _log_error(m: ErrorMessage val) =>

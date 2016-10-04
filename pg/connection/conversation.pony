@@ -96,7 +96,7 @@ actor ExecuteConversation is Conversation
     _conn.writev(recover val FlushMessage.done() end)
 
   be apply(c: BEConnection tag) =>
-    c.writev(recover val ParseMessage(query, "", recover [as I32: 23, 23] end).done() end)
+    c.writev(recover val ParseMessage(query, "", TypeOids(params)).done() end)
     _flush()
 
   be _bind() =>

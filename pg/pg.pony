@@ -42,7 +42,6 @@ class PGValueIterator is Iterator[Array[PGValue val]]
       let fmt = _desc.fields(idx).format
       idx = idx + 1
       result.push(Decode(typ, value.data, fmt))
-      Debug.out("###")
     end
     result
 
