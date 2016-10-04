@@ -1,7 +1,11 @@
 primitive IdleTransction
+  fun string(): String => "Idle"
 primitive ActiveTransaction
+  fun string(): String => "Active"
 primitive ErrorTransaction
+  fun string(): String => "Error"
 primitive UnknownTransactionStatus
+  fun string(): String => "Unknown"
 
 type TransactionStatus is (IdleTransction
                           | ActiveTransaction
@@ -20,4 +24,5 @@ primitive StatusFromByte
 
 
 trait Message
+  fun string(): String => "Unknown"
 

@@ -22,6 +22,8 @@ interface PassCB is StringCB
 interface UserCB is StringCB
 
 
+type PGValue is (I64 | I32 | None)
+
 class PGValueIterator is Iterator[Array[PGValue val]]
   let _it: Iterator[Array[FieldData val] val]
   let _desc: RowDescription val
@@ -40,6 +42,7 @@ class PGValueIterator is Iterator[Array[PGValue val]]
       let fmt = _desc.fields(idx).format
       idx = idx + 1
       result.push(Decode(typ, value.data, fmt))
+      Debug.out("###")
     end
     result
 
@@ -53,6 +56,7 @@ class Rows
   fun values(): Iterator[Array[PGValue val]] =>
     let it = _rows.slice().values()
     PGValueIterator(consume it, desc)
+  fun size(): USize => _rows.size()
   //fun as_maps()
 
 
@@ -69,6 +73,9 @@ actor Connection
 
   be raw(q: String, handler: RowsCB val) =>
     _conn.raw(q, handler)
+
+  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+    _conn.execute(query, params, handler)
 
   be do_terminate() =>
     Debug.out("Bye")
@@ -134,13 +141,24 @@ actor Session
     None
     /*try _pool.connect(_env.root as AmbientAuth) end*/
 
-  be raw(q: String, handler: RowsCB val) =>
+  be raw(query: String, handler: RowsCB val) =>
     try
-      let f = recover lambda(c: Connection)(q, handler) => c.raw(q, handler) end end
+      let f = recover lambda(c: Connection)(query, handler) =>
+          c.raw(query, handler)
+        end
+      end
       _mgr.connect(_env.root as AmbientAuth, consume f)
     end
 
-  be connected() => None
+    
+  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+    try
+      let f = recover lambda(c: Connection)(query, params, handler) =>
+          c.execute(query, params, handler)
+        end
+      end
+      _mgr.connect(_env.root as AmbientAuth, consume f)
+    end
 
   be terminate()=>
     _mgr.terminate()

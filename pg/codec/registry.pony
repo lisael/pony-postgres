@@ -1,5 +1,8 @@
+use "buffered"
 use "debug"
-type PGValue is (I64 | I32 | None)
+
+use "pg"
+
 
 primitive Decode
   fun apply(type_oid: I32, value: Array[U8] val, 0): PGValue ? =>
@@ -14,4 +17,16 @@ primitive DecodeText
   fun apply(type_oid: I32, value: Array[U8] val) ? => error
 
 primitive DecodeBinary
+  fun apply(23, value: Array[U8] val): I32 ? => 
+    var result = I32(0)
+    for i in value.values() do
+      result = (result << 8) + i.i32()
+    end
+    result
+    
   fun apply(type_oid: I32, value: Array[U8] val) ? => error
+
+primitive EncodeBinary
+  fun apply(param: I32, writer: Writer) ? =>
+    writer.i32_be(param)
+  fun apply(param: PGValue, writer: Writer) ? => error

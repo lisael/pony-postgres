@@ -6,6 +6,7 @@ use "pg/protocol"
 use "pg/introspect"
 
 trait ParseEvent
+  fun string(): String => "Unknown"
 primitive ParsePending is ParseEvent
 class PGParseError is ParseEvent
   let msg: String
@@ -67,6 +68,8 @@ actor Listener
       return ParsePending
     end
     let result = match _ctype
+    | '1' => ParseCompleteMessage
+    | '2' => BindCompleteMessage
     | 'C' => try
         CommandCompleteMessage(parse_single_string())
       else

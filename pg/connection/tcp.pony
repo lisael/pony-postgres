@@ -4,10 +4,18 @@ use "debug"
 
 use "pg/introspect"
 use "pg/protocol"
+use "pg/codec"
 use "pg"
 
 interface BEConnection
   be raw(q: String, f: RowsCB val)
+  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val)
+  be writev(data: ByteSeqIter)
+  be log(msg: String)
+  be handle_message(s: ServerMessage val)
+  be next()
+  be schedule(conv: Conversation tag)
+  be do_terminate()
 
 class PGNotify is TCPConnectionNotify
   let _conn: _Connection
@@ -21,6 +29,7 @@ class PGNotify is TCPConnectionNotify
     _conn.connected()
 
   fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
+    Debug.out("received")
     _listener.received(consume data)
 
   fun ref closed(conn: TCPConnection ref) =>
@@ -28,14 +37,23 @@ class PGNotify is TCPConnectionNotify
     _listener.terminate()
     _conn.received(ConnectionClosedMessage)
 
-actor _Connection
+  fun ref sent(conn: TCPConnection ref, data: (String val | Array[U8 val] val)): (String val | Array[U8 val] val) =>
+    Debug.out("send")
+    match data
+    | let s: String val => for c in s.values() do Debug.out(c) end
+    | let s: Array[U8 val] val => for c in s.values() do Debug.out(c) end
+    end
+    conn.write_final(data)
+    ""
+
+actor _Connection is BEConnection
   let _conn: TCPConnection tag
   var _fe: ( Connection tag | None) = None // front-end connection
   let _pool: ConnectionManager tag
   let _listener: Listener tag
   let _params: Array[(String, String)] val
-  var _convs: List[_Conversation tag] = List[_Conversation tag]
-  var _current: _Conversation tag
+  var _convs: List[Conversation tag] = List[Conversation tag]
+  var _current: Conversation tag
   var _backend_key: (U32, U32) = (0, 0)
   
   new create(auth: AmbientAuth,
@@ -52,7 +70,8 @@ actor _Connection
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
 
-  fun ref _schedule(conv: _Conversation tag) =>
+
+  fun ref _schedule(conv: Conversation tag) =>
     match _current
     | let n: _NullConversation =>
       _current = conv
@@ -61,14 +80,19 @@ actor _Connection
       _convs.push(conv)
     end
 
-  be schedule(conv: _Conversation tag) =>
+  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+    schedule(ExecuteConversation(this, query, params, handler))
+
+  be raw(q: String, handler: RowsCB val) =>
+    schedule(_QueryConversation(q, this, handler))
+
+  be schedule(conv: Conversation tag) =>
     _schedule(conv)
 
   be connected() =>
     _current(this)
 
   be _set_backend_key(m: BackendKeyDataMessage val) =>
-    Debug("set backend key")
     _backend_key = m.data
 
   be log(msg: String) => _pool.log(msg)
@@ -83,9 +107,10 @@ actor _Connection
 
   be update_param(p: ParameterStatusMessage val) =>
     // TODO: update the parameters and allow the user to query them
-    Debug.out("Update param " + p.key + " " + p.value)
+    None
 
   be received(s: ServerMessage val) =>
+    Debug.out("recieved " + s.string())
     _current.message(s)
 
   be _log_error(m: ErrorMessage val) =>
@@ -106,9 +131,6 @@ actor _Connection
     else
       log("Unknown ServerMessage")
     end
-
-  be raw(q: String, handler: RowsCB val) =>
-    schedule(_QueryConversation(q, this, handler))
 
   be terminate() =>
     schedule(_TerminateConversation(this))
