@@ -78,7 +78,7 @@ actor ExecuteConversation is Conversation
   /*let param_types: Array[I32]*/
   let _conn: BEConnection tag
   let _handler: RowsCB val
-  var _rows: (Rows | None) = None
+  var _rows: (Rows val | Rows trn | None) = None
 
   new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: RowsCB val) =>
     query = q
@@ -89,43 +89,55 @@ actor ExecuteConversation is Conversation
 
   be log(msg: String) => _conn.log(msg)
 
-  fun flush() =>
+  fun _sync() =>
+    _conn.writev(recover val SyncMessage.done() end)
+
+  fun _flush() =>
     _conn.writev(recover val FlushMessage.done() end)
 
   be apply(c: BEConnection tag) =>
-    Debug.out("#####")
     c.writev(recover val ParseMessage(query, "", recover [as I32: 23, 23] end).done() end)
-    flush()
+    _flush()
 
   be _bind() =>
     _conn.writev(recover val BindMessage("", "", params).done() end)
-    flush()
+    _flush()
 
   be _execute() =>
     _conn.writev(recover val ExecuteMessage("", 0).done() end)
-    flush()
+    _flush()
 
   be _describe() =>
     _conn.writev(recover val DescribeMessage('P', "").done() end)
-    flush()
+    _flush()
+
+  be _close() =>
+    _conn.writev(recover val CloseMessage('P', "").done() end)
+    _flush()
 
   be row(m: DataRowMessage val) =>
-    try (_rows as Rows).append(m.fields) end
+    try (_rows as Rows trn).append(m.fields) end
+
 
   be call_back() =>
     // TODO; don't fail silently
-    Debug.out("call_back")
-    try _handler(_rows as Rows) end
+    try
+      _rows = recover val  _rows as Rows trn end
+      _handler(_rows as Rows val)
+    end
 
   be message(m: ServerMessage val)=>
     match m
     | let r: ParseCompleteMessage val => _bind()
+    | let r: CloseCompleteMessage val => _sync()
     | let r: BindCompleteMessage val => _describe()
     | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: RowDescriptionMessage val => _rows = Rows(r.row); _execute()
+    | let r: RowDescriptionMessage val =>
+      _rows = recover trn Rows(r.row) end
+      _execute()
     | let r: DataRowMessage val => row(r)
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
-    | let r: CommandCompleteMessage val => call_back(); Debug.out(r.command)
+    | let r: CommandCompleteMessage val => call_back(); _close()
     else
       _conn.handle_message(m)
     end
@@ -134,7 +146,7 @@ actor _QueryConversation is Conversation
   let query: String val
   let _conn: _Connection
   let _handler: RowsCB val
-  var _rows: (Rows | None) = None
+  var _rows: (Rows val | Rows trn | None) = None
 
   new create(q: String, c: _Connection, h: RowsCB val) =>
     query = q
@@ -148,17 +160,20 @@ actor _QueryConversation is Conversation
 
   be call_back() =>
     // TODO; don't fail silently
-    try _handler(_rows as Rows) end
+    try
+      _rows = recover val  _rows as Rows trn end
+      _handler(_rows as Rows val)
+    end
 
   be row(m: DataRowMessage val) =>
-    try (_rows as Rows).append(m.fields) end
+    try (_rows as Rows trn).append(m.fields) end
 
   be message(m: ServerMessage val)=>
     match m
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
     | let r: CommandCompleteMessage val => call_back(); Debug.out(r.command)
     | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: RowDescriptionMessage val => _rows = Rows(r.row)
+    | let r: RowDescriptionMessage val => _rows = recover trn Rows(r.row) end
     | let r: DataRowMessage val => row(r)
     else
       _conn.handle_message(m)

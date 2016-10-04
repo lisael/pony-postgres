@@ -113,6 +113,16 @@ class DescribeMessage is ClientMessage
 
   fun ref done(): Array[ByteSeq] iso^ => _done('D') 
 
+class CloseMessage is ClientMessage
+  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+
+  new create(typ: U8, name: String) =>
+    _u8(typ)
+    _write(name)
+    _zero()
+
+  fun ref done(): Array[ByteSeq] iso^ => _done('C') 
+
 class ParseMessage is ClientMessage
   let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
 

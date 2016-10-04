@@ -61,7 +61,7 @@ class Rows
 
 
 interface RowsCB
-  fun apply(iter: Rows)
+  fun apply(iter: Rows val)
 
 type Param is (String, String)
 

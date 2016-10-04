@@ -20,6 +20,8 @@ class ParseCompleteMessage is ServerMessage
   fun string(): String => "Parse complete"
 class BindCompleteMessage is ServerMessage
   fun string(): String => "Bind complete"
+class CloseCompleteMessage is ServerMessage
+  fun string(): String => "Close complete"
 class MD5PwdRequest is ServerMessage
   let salt: Array[U8] val
   new val create(salt': Array[U8] val)=>

@@ -70,6 +70,7 @@ actor Listener
     let result = match _ctype
     | '1' => ParseCompleteMessage
     | '2' => BindCompleteMessage
+    | '3' => CloseCompleteMessage
     | 'C' => try
         CommandCompleteMessage(parse_single_string())
       else
