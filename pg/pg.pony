@@ -58,6 +58,12 @@ class Rows
   fun size(): USize => _rows.size()
   //fun as_maps()
 
+class Result
+  let _desc: RowDescription val
+  let _tuple: Array[FieldData val] val = recover val Array[FieldData val] end
+
+  new create(d: RowDescription val) => _desc = d
+
 
 interface RowsCB
   fun apply(iter: Rows val)
@@ -76,8 +82,14 @@ actor Connection
   be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
     _conn.execute(query, params, handler)
 
+  be terminate() =>
+    _conn.terminate()
+
   be do_terminate() =>
     Debug.out("Bye")
+
+  be cursor(query: String, notify: CursorNotify iso) =>
+    Debug.out("######### Cursor ############")
 
      
 interface PasswordProvider
@@ -129,16 +141,14 @@ actor Session
         RawPasswordProvider("")
       end
 
-    _mgr = ConnectionManager(this, host, service, user', provider, 
+    _mgr = ConnectionManager(host, service, user', provider, 
       recover val [("user", user'), ("database", database)] end)
 
   be log(msg: String) =>
     _env.out.print(msg)
 
-  be connect() =>
-    """Create a connection and try to log in"""
-    None
-    /*try _pool.connect(_env.root as AmbientAuth) end*/
+  be connect(f: {(Connection tag)} val) =>
+    try _mgr.connect(_env.root as AmbientAuth, f) end
 
   be raw(query: String, handler: RowsCB val) =>
     try

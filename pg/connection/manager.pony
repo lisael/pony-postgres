@@ -1,34 +1,42 @@
 use "collections"
+use "promises"
 
 use "pg"
 
 actor ConnectionManager
   let _connections: Array[_Connection] = Array[_Connection tag]
   let _params: Array[(String, String)] val
-  let _sess: Session tag
   let _host: String
   let _service: String
   let _user: String
   let _passwd_provider: PasswordProvider tag
   var _password: (String | None) = None
 
-  new create(session: Session tag,
-             host: String,
+  new create(host: String,
              service: String,
              user: String,
              passwd_provider: PasswordProvider tag,
              params: Array[Param] val) =>
     _params = params
-    _sess = session
     _host = host
     _service = service
     _passwd_provider = passwd_provider
     _user = user
 
   be log(msg: String) =>
-    _sess.log(msg)
+    None
 
-  be connect(auth: AmbientAuth, f: {(Connection tag)} iso) =>
+  be connect(auth: AmbientAuth, f: ({(Connection tag):(Any)} val | Promise[Connection tag])) =>
+    let priv_conn=_Connection(auth, _host, _service, _params, this)
+    _connections.push(priv_conn)
+    let conn = Connection(priv_conn)
+    priv_conn.set_frontend(conn)
+    match f
+    | let f': Promise[Connection tag] => f'(conn)
+    | let f': {(Connection tag)} val => f'(conn)
+    end
+
+  be connect_p(auth: AmbientAuth, f: {(Connection tag)} iso) =>
     let priv_conn=_Connection(auth, _host, _service, _params, this)
     _connections.push(priv_conn)
     let conn = Connection(priv_conn)
