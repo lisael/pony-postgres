@@ -14,7 +14,7 @@ interface CursorNotify
 
 interface BEConnection
   be raw(q: String, f: RowsCB val)
-  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val)
+  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val | RowsCB val))
   be writev(data: ByteSeqIter)
   be log(msg: String)
   be handle_message(s: ServerMessage val)
@@ -87,7 +87,7 @@ actor _Connection is BEConnection
       _convs.push(conv)
     end
 
-  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val| RowsCB val)) =>
     schedule(ExecuteConversation(this, query, params, handler))
 
   be raw(q: String, handler: RowsCB val) =>

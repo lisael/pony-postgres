@@ -89,6 +89,14 @@ actor Main
                   end
                 end)
 
+    session.execute("SELECT $1, $2 as foo",
+                 recover val [as PGValue: I32(80000), I32(-1100000)] end,
+                 recover val
+                  lambda(r: Array[Result val] val)(that) =>
+                      that.execute_handler_results(r)
+                  end
+                end)
+
     let p = session.connect(recover val
       lambda(c: Connection tag) =>
         BlogEntriesView(c)
@@ -114,5 +122,11 @@ actor Main
       for value in row.values() do
         try Debug.out(value as I32) else Debug.out("error...") end
       end
+    end
+
+  be execute_handler_results(rows: Array[Result val] val) =>
+    for row in rows.values() do
+      try Debug.out(row(0) as I32) end
+      try Debug.out(row("foo") as I32) end
     end
     session.terminate()

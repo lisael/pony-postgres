@@ -61,7 +61,10 @@ class CommandCompleteMessage is ServerMessage
 
 class RowDescriptionMessage is ServerMessage
   let row: RowDescription val
-  new val create(rd: RowDescription val) => row = rd
+  let tuple_desc: TupleDescription val
+  new val create(rd: RowDescription val, td: TupleDescription val) =>
+    row = rd
+    tuple_desc = td
   fun string(): String => "RowDescriptionMessage"
 
 class DataRowMessage is ServerMessage

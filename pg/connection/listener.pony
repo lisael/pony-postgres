@@ -50,21 +50,17 @@ actor Listener
     _clen = r.i32_be().usize()
 
   fun ref parse_response(): (ServerMessage val|ParseEvent val) =>
-    /*Debug.out("parse response:")*/
-    /*Debug.out(" _ctype: " + _ctype.string())*/
-    /*Debug.out(" _clen: " + _clen.string())*/
     try
       parse_type()
       parse_len()
     else
-      Debug.out("  Pending"); return ParsePending
+      /*Debug.out("  Pending")*/
+      return ParsePending
     end
-    /*Debug.out(" parse len and type: ")*/
-    Debug.out("  _ctype: " + _ctype.string())
+    /*Debug.out("  _ctype: " + _ctype.string())*/
     /*Debug.out("  _clen: " + _clen.string())*/
     if _clen > ( r.size() + 4) then
-      Debug.out("  Pending (_clen: " + _clen.string()
-        + ", r.size: " + r.size().string() + ")" )
+      /*Debug.out("  Pending (_clen: " + _clen.string() + ", r.size: " + r.size().string() + ")" )*/
       return ParsePending
     end
     let result = match _ctype
@@ -128,8 +124,9 @@ actor Listener
   fun ref parse_row_description(): ServerMessage val =>
     let rd = RowDescription
     try
-      let n_fields = r.u16_be()
-      for n in Range(0, n_fields.usize()) do
+      let n_fields = r.u16_be().usize()
+      let field_descs = recover Array[FieldDescription val](n_fields) end
+      for n in Range(0, n_fields) do
         let name = parse_string()
         let table_oid = r.i32_be()
         let col_number = r.i16_be()
@@ -137,11 +134,14 @@ actor Listener
         let type_size = r.i16_be()
         let type_modifier = r.i32_be()
         let format = r.i16_be()
-        rd.append(FieldDescription(name, table_oid, col_number,
+        let fd = recover val FieldDescription(name, table_oid, col_number,
                                    type_oid, type_size,
-                                   type_modifier, format))
+                                   type_modifier, format)end
+        rd.append(fd)
+        field_descs.push(fd)
       end
-      RowDescriptionMessage(recover val consume ref rd end)
+      let td = recover val TupleDescription(recover val consume field_descs end) end
+      RowDescriptionMessage(recover val consume ref rd end, td)
     else
       PGParseError("Unreachable")
     end

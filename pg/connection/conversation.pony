@@ -3,6 +3,7 @@ use "crypto"
 
 use "pg/protocol"
 use "pg/codec"
+use "pg/introspect"
 use "pg"
 
 trait Conversation
@@ -77,10 +78,12 @@ actor ExecuteConversation is Conversation
   let params: Array[PGValue] val
   /*let param_types: Array[I32]*/
   let _conn: BEConnection tag
-  let _handler: RowsCB val
+  let _handler: (RowsCB val | ResultCB val)
   var _rows: (Rows val | Rows trn | None) = None
+  var _tuples: (Array[Result val] trn | Array[Result val] val) = recover trn Array[Result val] end
+  var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: RowsCB val) =>
+  new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: (ResultCB val | RowsCB val)) =>
     query = q
     params = p
     /*param_types = */
@@ -116,14 +119,24 @@ actor ExecuteConversation is Conversation
     _flush()
 
   be row(m: DataRowMessage val) =>
+    try
+      let res = recover val Result(_tuple_desc as TupleDescription val, m.fields) end
+      (_tuples as Array[Result val] trn).push(res)
+    end
     try (_rows as Rows trn).append(m.fields) end
 
 
   be call_back() =>
     // TODO; don't fail silently
     try
-      _rows = recover val  _rows as Rows trn end
-      _handler(_rows as Rows val)
+      match _handler
+      | let h: RowsCB val =>
+        _rows = recover val  _rows as Rows trn end
+        h(_rows as Rows val)
+      | let h: ResultCB val =>
+        _tuples = recover val  _tuples as Array[Result val] trn end
+        h(_tuples as Array[Result val] val)
+      end
     end
 
   be message(m: ServerMessage val)=>
@@ -134,6 +147,7 @@ actor ExecuteConversation is Conversation
     | let r: ReadyForQueryMessage val => _conn.next()
     | let r: RowDescriptionMessage val =>
       _rows = recover trn Rows(r.row) end
+      _tuple_desc = r.tuple_desc
       _execute()
     | let r: DataRowMessage val => row(r)
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")

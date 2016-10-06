@@ -1,3 +1,5 @@
+use "collections"
+
 class FieldDescription
   let name: String
   let table_oid: I32
@@ -27,6 +29,26 @@ class RowDescription
   let fields: Array[FieldDescription val]= Array[FieldDescription val]
 
   fun ref append(f: FieldDescription val) => fields.push(f)
+
+class TupleDescription
+  let _fields: Array[FieldDescription val] val
+  let _by_name: Map[String, (USize, FieldDescription val)] = Map[String, (USize, FieldDescription val)]
+
+  new create(fields: Array[FieldDescription val] val) =>
+    _fields = fields
+    var pos = USize(0)
+    for d in fields.values() do
+      _by_name.update(d.name, (pos, d))
+      pos = pos + 1
+    end
+
+  fun apply(idx: (USize| String)): (USize, FieldDescription val) ? =>
+    match idx
+    | let idx': USize => (idx', _fields(idx'))
+    | let idx': String => _by_name(idx')
+    else
+      error
+    end
 
 class FieldData
   let len: I32

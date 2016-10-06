@@ -59,14 +59,22 @@ class Rows
   //fun as_maps()
 
 class Result
-  let _desc: RowDescription val
-  let _tuple: Array[FieldData val] val = recover val Array[FieldData val] end
+  let _desc: TupleDescription val
+  let _tuple: Array[FieldData val] val
 
-  new create(d: RowDescription val) => _desc = d
+  new create(d: TupleDescription val, t: Array[FieldData val] val ) =>
+    _desc = d
+    _tuple = t
 
+  fun apply(idx: ( USize | String )): PGValue ? =>
+    (let pos: USize, let d: FieldDescription val) = _desc(idx) 
+    Decode(d.type_oid, _tuple(pos).data, d.format)
 
 interface RowsCB
   fun apply(iter: Rows val)
+
+interface ResultCB
+  fun apply(iter: Array[Result val] val)
 
 type Param is (String, String)
 
@@ -79,7 +87,7 @@ actor Connection
   be raw(q: String, handler: RowsCB val) =>
     _conn.raw(q, handler)
 
-  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val | RowsCB val)) =>
     _conn.execute(query, params, handler)
 
   be terminate() =>
@@ -160,7 +168,7 @@ actor Session
     end
 
     
-  be execute(query: String, params: Array[PGValue] val, handler: RowsCB val) =>
+  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val | RowsCB val)) =>
     try
       let f = recover lambda(c: Connection)(query, params, handler) =>
           c.execute(query, params, handler)
