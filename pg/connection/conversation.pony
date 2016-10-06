@@ -78,12 +78,11 @@ actor ExecuteConversation is Conversation
   let params: Array[PGValue] val
   /*let param_types: Array[I32]*/
   let _conn: BEConnection tag
-  let _handler: (RowsCB val | ResultCB val)
-  var _rows: (Rows val | Rows trn | None) = None
-  var _tuples: (Array[Result val] trn | Array[Result val] val) = recover trn Array[Result val] end
+  let _handler: ResultCB val
+  var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: (ResultCB val | RowsCB val)) =>
+  new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: ResultCB val) =>
     query = q
     params = p
     /*param_types = */
@@ -121,22 +120,15 @@ actor ExecuteConversation is Conversation
   be row(m: DataRowMessage val) =>
     try
       let res = recover val Result(_tuple_desc as TupleDescription val, m.fields) end
-      (_tuples as Array[Result val] trn).push(res)
+      (_rows as Rows trn).push(res)
     end
-    try (_rows as Rows trn).append(m.fields) end
 
 
   be call_back() =>
     // TODO; don't fail silently
     try
-      match _handler
-      | let h: RowsCB val =>
-        _rows = recover val  _rows as Rows trn end
-        h(_rows as Rows val)
-      | let h: ResultCB val =>
-        _tuples = recover val  _tuples as Array[Result val] trn end
-        h(_tuples as Array[Result val] val)
-      end
+      _rows = recover val  _rows as Rows trn end
+      _handler(_rows as Rows val)
     end
 
   be message(m: ServerMessage val)=>
@@ -146,7 +138,6 @@ actor ExecuteConversation is Conversation
     | let r: BindCompleteMessage val => _describe()
     | let r: ReadyForQueryMessage val => _conn.next()
     | let r: RowDescriptionMessage val =>
-      _rows = recover trn Rows(r.row) end
       _tuple_desc = r.tuple_desc
       _execute()
     | let r: DataRowMessage val => row(r)
@@ -159,10 +150,11 @@ actor ExecuteConversation is Conversation
 actor _QueryConversation is Conversation
   let query: String val
   let _conn: _Connection
-  let _handler: RowsCB val
-  var _rows: (Rows val | Rows trn | None) = None
+  let _handler: ResultCB val
+  var _rows: (Rows val | Rows trn ) = recover trn Rows end
+  var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(q: String, c: _Connection, h: RowsCB val) =>
+  new create(q: String, c: _Connection, h: ResultCB val) =>
     query = q
     _conn = c
     _handler = h
@@ -180,14 +172,17 @@ actor _QueryConversation is Conversation
     end
 
   be row(m: DataRowMessage val) =>
-    try (_rows as Rows trn).append(m.fields) end
+    try
+      let res = recover val Result(_tuple_desc as TupleDescription val, m.fields) end
+      (_rows as Rows trn).push(res)
+    end
 
   be message(m: ServerMessage val)=>
     match m
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
     | let r: CommandCompleteMessage val => call_back(); Debug.out(r.command)
     | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: RowDescriptionMessage val => _rows = recover trn Rows(r.row) end
+    | let r: RowDescriptionMessage val => _tuple_desc = r.tuple_desc
     | let r: DataRowMessage val => row(r)
     else
       _conn.handle_message(m)

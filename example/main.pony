@@ -74,14 +74,14 @@ actor Main
                    database="macflytest")
 
     let that = recover tag this end
-    session.raw("SELECT 42, 24;;",
+    session.raw("SELECT 42, 24 as foo;;",
              recover val
               lambda(r: Rows val)(that) =>
                   that.raw_handler(r)
               end
              end)
 
-    session.execute("SELECT $1, $2",
+    session.execute("SELECT $1, $2 as foo",
                  recover val [as PGValue: I32(70000), I32(-100000)] end,
                  recover val
                   lambda(r: Rows val)(that) =>
@@ -104,27 +104,18 @@ actor Main
     end) 
 
   be raw_handler(rows: Rows val) =>
-    for d in rows.desc.fields.values() do
-      Debug.out(d.name)
-    end
     for row in rows.values() do
-      for value in row.values() do
-        try Debug.out(value as I32) else Debug.out("error...") end
-      end
+      try Debug.out(row(0) as I32) end
+      try Debug.out(row("foo") as I32) end
     end
 
   be execute_handler(rows: Rows val) =>
-    for d in rows.desc.fields.values() do
-      Debug.out(d.type_oid)
-      Debug.out(d.name)
-    end
     for row in rows.values() do
-      for value in row.values() do
-        try Debug.out(value as I32) else Debug.out("error...") end
-      end
+      try Debug.out(row(0) as I32) end
+      try Debug.out(row("foo") as I32) end
     end
 
-  be execute_handler_results(rows: Array[Result val] val) =>
+  be execute_handler_results(rows: Rows val) =>
     for row in rows.values() do
       try Debug.out(row(0) as I32) end
       try Debug.out(row("foo") as I32) end

@@ -45,19 +45,6 @@ class PGValueIterator is Iterator[Array[PGValue val]]
     end
     result
 
-class Rows
-  let _rows: Array[Array[FieldData val] val] = Array[Array[FieldData val]val]
-  let desc: RowDescription val
-
-  new create(d: RowDescription val) => desc = d
-  fun ref append(d: Array[FieldData val]val) => _rows.push(d)
-  fun fields(): Iterator[Array[FieldData val] val] => _rows.values()
-  fun values(): Iterator[Array[PGValue val]] =>
-    let it = _rows.slice().values()
-    PGValueIterator(consume it, desc)
-  fun size(): USize => _rows.size()
-  //fun as_maps()
-
 class Result
   let _desc: TupleDescription val
   let _tuple: Array[FieldData val] val
@@ -70,13 +57,12 @@ class Result
     (let pos: USize, let d: FieldDescription val) = _desc(idx) 
     Decode(d.type_oid, _tuple(pos).data, d.format)
 
-interface RowsCB
-  fun apply(iter: Rows val)
-
 interface ResultCB
   fun apply(iter: Array[Result val] val)
 
 type Param is (String, String)
+
+type Rows is Array[Result val]
 
 actor Connection
   let _conn: BEConnection tag
@@ -84,10 +70,10 @@ actor Connection
   new create(c: BEConnection tag) =>
     _conn = c
 
-  be raw(q: String, handler: RowsCB val) =>
+  be raw(q: String, handler: ResultCB val) =>
     _conn.raw(q, handler)
 
-  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val | RowsCB val)) =>
+  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val) =>
     _conn.execute(query, params, handler)
 
   be terminate() =>
@@ -158,7 +144,7 @@ actor Session
   be connect(f: {(Connection tag)} val) =>
     try _mgr.connect(_env.root as AmbientAuth, f) end
 
-  be raw(query: String, handler: RowsCB val) =>
+  be raw(query: String, handler: ResultCB val) =>
     try
       let f = recover lambda(c: Connection)(query, handler) =>
           c.raw(query, handler)
@@ -168,7 +154,7 @@ actor Session
     end
 
     
-  be execute(query: String, params: Array[PGValue] val, handler: (ResultCB val | RowsCB val)) =>
+  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val) =>
     try
       let f = recover lambda(c: Connection)(query, params, handler) =>
           c.execute(query, params, handler)
