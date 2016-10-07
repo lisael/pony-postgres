@@ -144,7 +144,7 @@ actor Session
   be connect(f: {(Connection tag)} val) =>
     try _mgr.connect(_env.root as AmbientAuth, f) end
 
-  be raw(query: String, handler: ResultCB val) =>
+  be _raw(query: String, handler: ResultCB val) =>
     try
       let f = recover lambda(c: Connection)(query, handler) =>
           c.raw(query, handler)
@@ -154,12 +154,23 @@ actor Session
     end
 
     
-  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val) =>
-    try
-      let f = recover lambda(c: Connection)(query, params, handler) =>
-          c.execute(query, params, handler)
-        end
+  be execute(query: String,
+             handler: ResultCB val,
+             params: (Array[PGValue] val | None) = None) =>
+    match params
+    | let p: None => _raw(query, handler)
+    | let p: Array[PGValue] val => _execute(query,  handler, p)
+    end
+
+  be _execute(query: String,
+              handler: ResultCB val,
+              params: Array[PGValue] val) =>
+
+    let f = recover lambda(c: Connection)(query, params, handler) =>
+        c.execute(query, params, handler)
       end
+    end
+    try
       _mgr.connect(_env.root as AmbientAuth, consume f)
     end
 

@@ -29,10 +29,10 @@ class User
     field1 = f1
 
 
-class BlogEntryRowNotify
+class BlogEntryResultNotify
   let entries: Array[BlogEntry] = Array[BlogEntry]
   let view: BlogEntriesView tag
-  new create(v: BlogEntriesView tag) => view = v
+  new iso create(v: BlogEntriesView tag) => view = v
   fun iso descirption(desc: RowDescription) => None
   fun iso row(data: Array[PGValue]) => None
   fun iso stop() => None
@@ -47,7 +47,7 @@ actor BlogEntriesView
     try
       (_conn as Connection).cursor(
         "SELECT 1, 2, 3 UNION ALL SELECT 4, 5, 6 UNION ALL SELECT 7, 8, 9",
-        recover BlogEntryRowNotify(this) end)
+        recover BlogEntryResultNotify(this) end)
       (_conn as Connection).terminate()
     end
 
@@ -55,7 +55,7 @@ actor BlogEntriesView
     try
       (_conn as Connection).cursor(
         "SELECT 1",
-        recover BlogEntryRowNotify(this) end)
+        recover BlogEntryResultNotify(this) end)
       (_conn as Connection).terminate()
     end
 
@@ -74,7 +74,7 @@ actor Main
                    database="macflytest")
 
     let that = recover tag this end
-    session.raw("SELECT 42, 24 as foo;;",
+    session.execute("SELECT 42, 24 as foo;;",
              recover val
               lambda(r: Rows val)(that) =>
                   that.raw_handler(r)
@@ -82,20 +82,12 @@ actor Main
              end)
 
     session.execute("SELECT $1, $2 as foo",
-                 recover val [as PGValue: I32(70000), I32(-100000)] end,
-                 recover val
-                  lambda(r: Rows val)(that) =>
-                      that.execute_handler(r)
-                  end
-                end)
-
-    session.execute("SELECT $1, $2 as foo",
-                 recover val [as PGValue: I32(80000), I32(-1100000)] end,
-                 recover val
-                  lambda(r: Array[Result val] val)(that) =>
-                      that.execute_handler_results(r)
-                  end
-                end)
+                    recover val
+                      lambda(r: Rows val)(that) =>
+                        that.execute_handler(r)
+                      end
+                    end,
+                   recover val [as PGValue: I32(70000), I32(-100000)] end)
 
     let p = session.connect(recover val
       lambda(c: Connection tag) =>
@@ -110,12 +102,6 @@ actor Main
     end
 
   be execute_handler(rows: Rows val) =>
-    for row in rows.values() do
-      try Debug.out(row(0) as I32) end
-      try Debug.out(row("foo") as I32) end
-    end
-
-  be execute_handler_results(rows: Rows val) =>
     for row in rows.values() do
       try Debug.out(row(0) as I32) end
       try Debug.out(row("foo") as I32) end
