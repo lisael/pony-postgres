@@ -70,11 +70,10 @@ actor Connection
   new create(c: BEConnection tag) =>
     _conn = c
 
-  be raw(q: String, handler: ResultCB val) =>
-    _conn.raw(q, handler)
-
-  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val) =>
-    _conn.execute(query, params, handler)
+  be execute(query: String,
+             handler: ResultCB val,
+             params: (Array[PGValue] val | None) = None) =>
+    _conn.execute(query, handler, params)
 
   be terminate() =>
     _conn.terminate()
@@ -144,35 +143,14 @@ actor Session
   be connect(f: {(Connection tag)} val) =>
     try _mgr.connect(_env.root as AmbientAuth, f) end
 
-  be _raw(query: String, handler: ResultCB val) =>
-    try
-      let f = recover lambda(c: Connection)(query, handler) =>
-          c.raw(query, handler)
-        end
-      end
-      _mgr.connect(_env.root as AmbientAuth, consume f)
-    end
-
-    
   be execute(query: String,
              handler: ResultCB val,
              params: (Array[PGValue] val | None) = None) =>
-    match params
-    | let p: None => _raw(query, handler)
-    | let p: Array[PGValue] val => _execute(query,  handler, p)
-    end
-
-  be _execute(query: String,
-              handler: ResultCB val,
-              params: Array[PGValue] val) =>
-
     let f = recover lambda(c: Connection)(query, params, handler) =>
-        c.execute(query, params, handler)
+        c.execute(query, handler, params)
       end
     end
-    try
-      _mgr.connect(_env.root as AmbientAuth, consume f)
-    end
+    try _mgr.connect(_env.root as AmbientAuth, consume f) end
 
   be terminate()=>
     _mgr.terminate()

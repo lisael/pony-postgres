@@ -13,8 +13,9 @@ interface CursorNotify
   fun iso stop() => None
 
 interface BEConnection
-  be raw(q: String, f: ResultCB val)
-  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val)
+  be execute(query: String,
+             handler: ResultCB val,
+             params: (Array[PGValue] val | None) = None)
   be writev(data: ByteSeqIter)
   be log(msg: String)
   be handle_message(s: ServerMessage val)
@@ -77,7 +78,6 @@ actor _Connection is BEConnection
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
 
-
   fun ref _schedule(conv: Conversation tag) =>
     match _current
     | let n: _NullConversation =>
@@ -87,11 +87,15 @@ actor _Connection is BEConnection
       _convs.push(conv)
     end
 
-  be execute(query: String, params: Array[PGValue] val, handler: ResultCB val) =>
-    schedule(ExecuteConversation(this, query, params, handler))
-
-  be raw(q: String, handler: ResultCB val) =>
-    schedule(_QueryConversation(q, this, handler))
+  be execute(query: String,
+             handler: ResultCB val,
+             params: (Array[PGValue] val | None) = None) =>
+    match params
+    | let p: None =>
+      schedule(QueryConversation(this, query, handler))
+    | let p: Array[PGValue] val =>
+      schedule(ExecuteConversation(this, query, handler, p))
+    end
 
   be schedule(conv: Conversation tag) =>
     _schedule(conv)
@@ -140,7 +144,7 @@ actor _Connection is BEConnection
     end
 
   be terminate() =>
-    schedule(_TerminateConversation(this))
+    schedule(TerminateConversation(this))
 
   be do_terminate() =>
     try (_fe as Connection).do_terminate() end

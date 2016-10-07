@@ -82,7 +82,7 @@ actor ExecuteConversation is Conversation
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: BEConnection tag, q: String, p: Array[PGValue] val, h: ResultCB val) =>
+  new create(c: BEConnection tag, q: String, h: ResultCB val, p: Array[PGValue] val) =>
     query = q
     params = p
     /*param_types = */
@@ -147,14 +147,14 @@ actor ExecuteConversation is Conversation
       _conn.handle_message(m)
     end
 
-actor _QueryConversation is Conversation
+actor QueryConversation is Conversation
   let query: String val
   let _conn: _Connection
   let _handler: ResultCB val
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(q: String, c: _Connection, h: ResultCB val) =>
+  new create(c: _Connection, q: String, h: ResultCB val) =>
     query = q
     _conn = c
     _handler = h
@@ -188,7 +188,7 @@ actor _QueryConversation is Conversation
       _conn.handle_message(m)
     end
 
-actor _TerminateConversation is Conversation
+actor TerminateConversation is Conversation
   let _conn: BEConnection tag
 
   new create(c: BEConnection tag) =>
