@@ -16,12 +16,12 @@ class PGParseError is ParseEvent
 
 
 actor Listener
-  let _conn: _Connection
+  let _conn: BEConnection tag
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
 
-  new create(c: _Connection) =>
+  new create(c: BEConnection tag) =>
     _conn = c
 
   be received(data: Array[U8] iso) =>

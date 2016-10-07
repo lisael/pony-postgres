@@ -22,6 +22,7 @@ interface BEConnection
   be next()
   be schedule(conv: Conversation tag)
   be terminate()
+  be received(s: ServerMessage val)
   be do_terminate()
   be cursor(query: String, notify: CursorNotify iso) => None
 

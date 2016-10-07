@@ -8,15 +8,15 @@ use "pg"
 
 trait Conversation
   
-  be apply(c: _Connection) 
+  be apply(c: BEConnection tag) 
   be message(m: ServerMessage val)
 
 
 actor _NullConversation is Conversation
-  let _conn: _Connection
+  let _conn: BEConnection tag
 
-  new create(c: _Connection) => _conn = c
-  be apply(c: _Connection) => None
+  new create(c: BEConnection tag) => _conn = c
+  be apply(c: BEConnection tag) => None
   be message(m: ServerMessage val) =>
     _conn.handle_message(m)
 
@@ -24,8 +24,8 @@ actor _NullConversation is Conversation
 actor _AuthConversation is Conversation
   let _pool: ConnectionManager
   let _params: Array[(String, String)] val
-  let _conn: _Connection
-  new create(p: ConnectionManager, c: _Connection, params: Array[(String, String)] val) =>
+  let _conn: BEConnection tag
+  new create(p: ConnectionManager, c: BEConnection tag, params: Array[(String, String)] val) =>
     _pool=p
     _conn=c
     _params=params
@@ -33,7 +33,7 @@ actor _AuthConversation is Conversation
   be log(msg: String) =>
     _pool.log(msg)
 
-  be apply(c: _Connection) =>
+  be apply(c: BEConnection tag) =>
     let data = recover val
     let msg = StartupMessage(_params)
     msg.done() 
@@ -149,19 +149,19 @@ actor ExecuteConversation is Conversation
 
 actor QueryConversation is Conversation
   let query: String val
-  let _conn: _Connection
+  let _conn: BEConnection tag
   let _handler: ResultCB val
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: _Connection, q: String, h: ResultCB val) =>
+  new create(c: BEConnection tag, q: String, h: ResultCB val) =>
     query = q
     _conn = c
     _handler = h
 
   be log(msg: String) => _conn.log(msg)
 
-  be apply(c: _Connection) =>
+  be apply(c: BEConnection tag) =>
     c.writev(recover val QueryMessage(query).done() end)
 
   be call_back() =>
@@ -196,7 +196,7 @@ actor TerminateConversation is Conversation
 
   be log(msg: String) => _conn.log(msg)
 
-  be apply(c: _Connection) =>
+  be apply(c: BEConnection tag) =>
     c.writev(recover val TerminateMessage.done() end)
 
   be message(m: ServerMessage val)=>

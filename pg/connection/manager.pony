@@ -4,24 +4,28 @@ use "promises"
 use "pg"
 
 actor ConnectionManager
-  let _connections: Array[_Connection] = Array[_Connection tag]
+  let _connections: Array[BEConnection tag] = Array[BEConnection tag]
   let _params: Array[(String, String)] val
   let _host: String
   let _service: String
   let _user: String
   let _passwd_provider: PasswordProvider tag
   var _password: (String | None) = None
+  let _max_size: USize
 
   new create(host: String,
              service: String,
              user: String,
              passwd_provider: PasswordProvider tag,
-             params: Array[Param] val) =>
+             params: Array[Param] val,
+             pool_size: USize = 1
+             ) =>
     _params = params
     _host = host
     _service = service
     _passwd_provider = passwd_provider
     _user = user
+    _max_size = pool_size
 
   be log(msg: String) =>
     None
