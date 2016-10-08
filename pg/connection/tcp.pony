@@ -14,7 +14,7 @@ interface CursorNotify
 
 interface BEConnection
   be execute(query: String,
-             handler: ResultCB val,
+             handler: RecordCB val,
              params: (Array[PGValue] val | None) = None)
   be writev(data: ByteSeqIter)
   be log(msg: String)
@@ -89,7 +89,7 @@ actor _Connection is BEConnection
     end
 
   be execute(query: String,
-             handler: ResultCB val,
+             handler: RecordCB val,
              params: (Array[PGValue] val | None) = None) =>
     match params
     | let p: None =>

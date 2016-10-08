@@ -78,11 +78,11 @@ actor ExecuteConversation is Conversation
   let params: Array[PGValue] val
   /*let param_types: Array[I32]*/
   let _conn: BEConnection tag
-  let _handler: ResultCB val
+  let _handler: RecordCB val
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: BEConnection tag, q: String, h: ResultCB val, p: Array[PGValue] val) =>
+  new create(c: BEConnection tag, q: String, h: RecordCB val, p: Array[PGValue] val) =>
     query = q
     params = p
     /*param_types = */
@@ -119,7 +119,7 @@ actor ExecuteConversation is Conversation
 
   be row(m: DataRowMessage val) =>
     try
-      let res = recover val Result(_tuple_desc as TupleDescription val, m.fields) end
+      let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
       (_rows as Rows trn).push(res)
     end
 
@@ -150,11 +150,11 @@ actor ExecuteConversation is Conversation
 actor QueryConversation is Conversation
   let query: String val
   let _conn: BEConnection tag
-  let _handler: ResultCB val
+  let _handler: RecordCB val
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
-  new create(c: BEConnection tag, q: String, h: ResultCB val) =>
+  new create(c: BEConnection tag, q: String, h: RecordCB val) =>
     query = q
     _conn = c
     _handler = h
@@ -173,7 +173,7 @@ actor QueryConversation is Conversation
 
   be row(m: DataRowMessage val) =>
     try
-      let res = recover val Result(_tuple_desc as TupleDescription val, m.fields) end
+      let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
       (_rows as Rows trn).push(res)
     end
 

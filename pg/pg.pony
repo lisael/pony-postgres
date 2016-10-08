@@ -45,7 +45,7 @@ class PGValueIterator is Iterator[Array[PGValue val]]
     end
     result
 
-class Result
+class Record
   let _desc: TupleDescription val
   let _tuple: Array[FieldData val] val
 
@@ -57,31 +57,33 @@ class Result
     (let pos: USize, let d: FieldDescription val) = _desc(idx) 
     Decode(d.type_oid, _tuple(pos).data, d.format)
 
-interface ResultCB
-  fun apply(iter: Array[Result val] val)
+interface RecordCB
+  fun apply(iter: Array[Record val] val)
 
 type Param is (String, String)
 
-type Rows is Array[Result val]
+type Rows is Array[Record val]
 
 actor Connection
   let _conn: BEConnection tag
 
   new create(c: BEConnection tag) =>
+    Debug.out("## Create Connection ##")
     _conn = c
 
   be execute(query: String,
-             handler: ResultCB val,
+             handler: RecordCB val,
              params: (Array[PGValue] val | None) = None) =>
     _conn.execute(query, handler, params)
 
-  be terminate() =>
+  be release() =>
+    Debug.out("## Terminate ##")
     _conn.terminate()
 
   be do_terminate() =>
     Debug.out("Bye")
 
-  be cursor(query: String, notify: CursorNotify iso) =>
+  be fetch(query: String, notify: CursorNotify iso) =>
     Debug.out("######### Cursor ############")
 
      
@@ -144,7 +146,7 @@ actor Session
     try _mgr.connect(_env.root as AmbientAuth, f) end
 
   be execute(query: String,
-             handler: ResultCB val,
+             handler: RecordCB val,
              params: (Array[PGValue] val | None) = None) =>
     let f = recover lambda(c: Connection)(query, params, handler) =>
         c.execute(query, handler, params)

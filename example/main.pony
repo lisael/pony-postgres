@@ -38,6 +38,15 @@ class BlogEntryResultNotify
   fun iso stop() => None
 
 
+class UserResultNotify
+  let entries: Array[BlogEntry] = Array[BlogEntry]
+  let view: BlogEntriesView tag
+  new iso create(v: BlogEntriesView tag) => view = v
+  fun iso descirption(desc: RowDescription) => None
+  fun iso row(data: Array[PGValue]) => None
+  fun iso stop() => None
+
+
 actor BlogEntriesView
   var _conn: (Connection tag | None) = None
   var _user: ( User val | None ) = None
@@ -45,24 +54,27 @@ actor BlogEntriesView
 
   be fetch_entries() =>
     try
-      (_conn as Connection).cursor(
+      (_conn as Connection).fetch(
         "SELECT 1, 2, 3 UNION ALL SELECT 4, 5, 6 UNION ALL SELECT 7, 8, 9",
         recover BlogEntryResultNotify(this) end)
-      (_conn as Connection).terminate()
     end
 
   be fetch_user() =>
     try
-      (_conn as Connection).cursor(
+      (_conn as Connection).fetch(
         "SELECT 1",
         recover BlogEntryResultNotify(this) end)
-      (_conn as Connection).terminate()
     end
+
+  be render(entries: Array[BlogEntry iso] val) =>
+    try (_conn as Connection).release() end
+    
 
   be apply(conn: Connection tag) =>
     _conn = conn
     fetch_user()
     fetch_entries()
+    _entries.next[BlogEntriesView](recover this~render() end)
 
 
 actor Main
