@@ -12,7 +12,7 @@ trait Conversation
   be message(m: ServerMessage val)
 
 
-actor _NullConversation is Conversation
+actor NullConversation is Conversation
   let _conn: BEConnection tag
 
   new create(c: BEConnection tag) => _conn = c
@@ -21,7 +21,7 @@ actor _NullConversation is Conversation
     _conn.handle_message(m)
 
 
-actor _AuthConversation is Conversation
+actor AuthConversation is Conversation
   let _pool: ConnectionManager
   let _params: Array[(String, String)] val
   let _conn: BEConnection tag

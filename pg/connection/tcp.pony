@@ -74,14 +74,14 @@ actor _Connection is BEConnection
     _conn = TCPConnection(auth, PGNotify(this, _listener), host, service)
     _pool = pool
     _params = params
-    _current = _AuthConversation(_pool, this, _params)
+    _current = AuthConversation(_pool, this, _params)
 
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
 
   fun ref _schedule(conv: Conversation tag) =>
     match _current
-    | let n: _NullConversation =>
+    | let n: NullConversation =>
       _current = conv
       _current(this)
     else
@@ -114,7 +114,7 @@ actor _Connection is BEConnection
       _current = _convs.shift()
       _current(this)
     else
-      _current = _NullConversation(this)
+      _current = NullConversation(this)
     end
 
   be update_param(p: ParameterStatusMessage val) =>
