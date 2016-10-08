@@ -3,113 +3,21 @@ pg.pony
 
 Do pg stuff.
 """
-use "net"
-use "buffered"
-use "collections"
-use "promises"
 use "options"
 use "debug"
 
 use "pg/protocol"
-use "pg/introspect"
 use "pg/connection"
-use "pg/codec"
 
 
-interface StringCB
+interface _StringCB
   fun apply(s: String)
-interface PassCB is StringCB
-interface UserCB is StringCB
-
+interface PassCB is _StringCB
+interface UserCB is _StringCB
 
 type PGValue is (I64 | I32 | None)
 
-class PGValueIterator is Iterator[Array[PGValue val]]
-  let _it: Iterator[Array[FieldData val] val]
-  let _desc: RowDescription val
-
-  new create(it: Iterator[Array[FieldData val] val] ref, desc: RowDescription val) =>
-    _it = it
-    _desc = desc
-
-  fun ref has_next(): Bool => _it.has_next()
-
-  fun ref next(): Array[PGValue] ? =>
-    let result = Array[PGValue](_desc.fields.size())
-    var idx = USize(0)
-    for value in _it.next().values() do
-      let typ = _desc.fields(idx).type_oid
-      let fmt = _desc.fields(idx).format
-      idx = idx + 1
-      result.push(Decode(typ, value.data, fmt))
-    end
-    result
-
-class Record
-  let _desc: TupleDescription val
-  let _tuple: Array[FieldData val] val
-
-  new create(d: TupleDescription val, t: Array[FieldData val] val ) =>
-    _desc = d
-    _tuple = t
-
-  fun apply(idx: ( USize | String )): PGValue ? =>
-    (let pos: USize, let d: FieldDescription val) = _desc(idx) 
-    Decode(d.type_oid, _tuple(pos).data, d.format)
-
-interface RecordCB
-  fun apply(iter: Array[Record val] val)
-
 type Param is (String, String)
-
-type Rows is Array[Record val]
-
-actor Connection
-  let _conn: BEConnection tag
-
-  new create(c: BEConnection tag) =>
-    Debug.out("## Create Connection ##")
-    _conn = c
-
-  be execute(query: String,
-             handler: RecordCB val,
-             params: (Array[PGValue] val | None) = None) =>
-    _conn.execute(query, handler, params)
-
-  be release() =>
-    Debug.out("## Terminate ##")
-    _conn.terminate()
-
-  be do_terminate() =>
-    Debug.out("Bye")
-
-  be fetch(query: String, notify: CursorNotify iso) =>
-    Debug.out("######### Cursor ############")
-
-     
-interface PasswordProvider
-  be apply(f: PassCB val)
-  be chain(p: PasswordProvider tag)
-
-actor RawPasswordProvider
-  let _password: String
-
-  new create(p: String) => _password = p
-  be apply(f: PassCB val) => f(_password)
-  be chain(p: PasswordProvider tag) => None
-
-actor EnvPasswordProvider
-  let _env: Env
-  var _next: (PasswordProvider tag | None) = None
-
-  new create(e: Env) => _env = e
-  be chain(p: PasswordProvider tag) => _next = p
-  be apply(f: PassCB val) =>
-    try
-      f(EnvVars(_env.vars())("PGPASSWORD"))
-    else
-      try (_next as PasswordProvider tag)(f) end
-    end
 
 actor Session
   let _env: Env
