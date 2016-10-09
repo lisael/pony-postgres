@@ -7,11 +7,6 @@ use "pg/protocol"
 use "pg/codec"
 use "pg"
 
-interface CursorNotify
-  fun iso descirption(desc: RowDescription) => None
-  fun iso row(data: Array[PGValue]) => None
-  fun iso stop() => None
-
 interface BEConnection
   be execute(query: String,
              handler: RecordCB val,
@@ -24,7 +19,8 @@ interface BEConnection
   be terminate()
   be received(s: ServerMessage val)
   be do_terminate()
-  be cursor(query: String, notify: CursorNotify iso) => None
+  be fetch(query: String, notify: FetchNotify iso,
+           params: (Array[PGValue] val | None) = None)
 
 class PGNotify is TCPConnectionNotify
   let _conn: _Connection
@@ -98,6 +94,18 @@ actor _Connection is BEConnection
       schedule(ExecuteConversation(this, query, handler, p))
     end
 
+  be fetch(query: String, notify: FetchNotify iso,
+           params: (Array[PGValue] val | None) = None) =>
+     schedule(
+       FetchConversation(this, query, consume notify,
+         try
+           params as Array[PGValue] val
+         else
+           recover val Array[PGValue] end
+         end
+       )
+     )
+
   be schedule(conv: Conversation tag) =>
     _schedule(conv)
 
@@ -131,7 +139,8 @@ actor _Connection is BEConnection
       s.push(tagg)
       s.append(": ")
       s.append(text)
-      log(consume s)
+      Debug.out(consume s)
+      /*log(consume s)*/
     end
 
   be handle_message(s: ServerMessage val) =>

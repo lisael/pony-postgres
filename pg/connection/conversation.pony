@@ -73,10 +73,75 @@ actor AuthConversation is Conversation
       _conn.handle_message(m)
     end
 
+actor FetchConversation is Conversation
+  let query: String val
+  let params: Array[PGValue] val
+  let _conn: BEConnection tag
+  let _notify: FetchNotify ref
+  var _rows: (Rows val | Rows trn ) = recover trn Rows end
+  var _tuple_desc: (TupleDescription val | None) = None
+
+  new create(c: BEConnection tag, q: String,
+             n: FetchNotify iso, p: Array[PGValue] val) =>
+    query = q
+    params = p
+    _conn = c
+    _notify = consume n
+
+  be log(msg: String) => _conn.log(msg)
+
+  fun _sync() =>
+    _conn.writev(recover val SyncMessage.done() end)
+
+  fun _flush() =>
+    _conn.writev(recover val FlushMessage.done() end)
+
+  be apply(c: BEConnection tag) =>
+    c.writev(recover val ParseMessage(query, "", TypeOids(params)).done() end)
+    _flush()
+
+  be _bind() =>
+    _conn.writev(recover val BindMessage("", "", params).done() end)
+    _flush()
+
+  be _execute() =>
+    let s = _notify.size()
+    _conn.writev(recover val ExecuteMessage("", s).done() end)
+    _flush()
+
+  be _describe() =>
+    _conn.writev(recover val DescribeMessage('P', "").done() end)
+    _flush()
+
+  be _close() =>
+    _conn.writev(recover val CloseMessage('P', "").done() end)
+    _flush()
+
+  be row(m: DataRowMessage val) =>
+    try
+      let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
+      _notify.record(record) 
+    end
+
+  be message(m: ServerMessage val)=>
+    match m
+    | let r: ParseCompleteMessage val => _bind()
+    | let r: CloseCompleteMessage val => _sync()
+    | let r: BindCompleteMessage val => _describe()
+    | let r: ReadyForQueryMessage val => _conn.next()
+    | let r: RowDescriptionMessage val =>
+      _tuple_desc = r.tuple_desc
+      _execute()
+    | let r: DataRowMessage val => row(r)
+    | let r: EmptyQueryResponse val => Debug.out("Empty Query")
+    | let r: CommandCompleteMessage val => _notify.stop(); _close()
+    else
+      _conn.handle_message(m)
+    end
+
 actor ExecuteConversation is Conversation
   let query: String val
   let params: Array[PGValue] val
-  /*let param_types: Array[I32]*/
   let _conn: BEConnection tag
   let _handler: RecordCB val
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
@@ -85,7 +150,6 @@ actor ExecuteConversation is Conversation
   new create(c: BEConnection tag, q: String, h: RecordCB val, p: Array[PGValue] val) =>
     query = q
     params = p
-    /*param_types = */
     _conn = c
     _handler = h
 
