@@ -18,7 +18,6 @@ actor Connection
   let _conn: BEConnection tag
 
   new create(c: BEConnection tag) =>
-    Debug.out("## Create Connection ##")
     _conn = c
 
   be execute(query: String,
@@ -27,7 +26,6 @@ actor Connection
     _conn.execute(query, recover val _ReleasAfter~apply(this, handler) end, params)
 
   be release() =>
-    Debug.out("## Terminate ##")
     _conn.terminate()
 
   be do_terminate() =>
@@ -35,5 +33,4 @@ actor Connection
 
   be fetch(query: String, notify: FetchNotify iso,
            params: (Array[PGValue] val| None) = None) =>
-    Debug.out("######### Cursor ############")
     _conn.fetch(query, consume notify, params)

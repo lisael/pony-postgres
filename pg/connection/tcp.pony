@@ -115,7 +115,9 @@ actor _Connection is BEConnection
   be _set_backend_key(m: BackendKeyDataMessage val) =>
     _backend_key = m.data
 
-  be log(msg: String) => _pool.log(msg)
+  be log(msg: String) => 
+    Debug.out(msg)
+    _pool.log(msg)
 
   be next() =>
     try
@@ -150,7 +152,7 @@ actor _Connection is BEConnection
     | let m: ErrorMessage val => _log_error(m)
     | let m: ConnectionClosedMessage val => log("Disconected")
     else
-      log("Unknown ServerMessage")
+      log("Unknown ServerMessage: " + s.string())
     end
 
   be terminate() =>

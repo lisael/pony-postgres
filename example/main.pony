@@ -37,16 +37,18 @@ class BlogEntryRecordNotify is FetchNotify
   let view: BlogEntriesView tag
   new iso create(v: BlogEntriesView tag) => view = v
   fun ref descirption(desc: RowDescription) => None
-  fun size(): USize => 1
+  fun size(): USize => 100000
   fun ref record(r: Record val) =>
     try
-      (entries as Array[BlogEntry val] trn).push(
-        recover val BlogEntry(
+       let e = recover val BlogEntry(
           r(0) as I32,
-          r(1) as I32,
-          r(2) as I32
+          2, 3
+          /*r(1) as I32,*/
+          /*r(2) as I32*/
         ) end
-      )
+      Debug.out(e.string())
+      /*(entries as Array[BlogEntry val] trn).push(e)*/
+
     end
   fun ref stop() =>
     try
@@ -75,7 +77,8 @@ actor BlogEntriesView
   be fetch_entries() =>
     try
       (_conn as Connection).fetch(
-        "SELECT 1 as user_id, 2, 3 UNION ALL SELECT 4 as user_id, 5, 6 UNION ALL SELECT 7 as user_id, 8, 9",
+        /*"SELECT 1 as user_id, 2, 3 UNION ALL SELECT 4 as user_id, 5, 6 UNION ALL SELECT 7 as user_id, 8, 9",*/
+        "SELECT generate_series(0,1000000)",
         recover BlogEntryRecordNotify(this) end)
     end
 
@@ -93,7 +96,8 @@ actor BlogEntriesView
   be render(entries': Array[BlogEntry val] val) =>
     Debug.out("render")
     for p in entries'.values() do
-      Debug.out(p.string())
+      /*Debug.out(p.string())*/
+      None
     end
     try (_conn as Connection).release() end
 

@@ -20,8 +20,12 @@ actor Listener
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
+  var _batch: Bool = false
+  var _rows: (Array[DataRowMessage val] trn | Array[DataRowMessage val] val) =
+    recover trn Array[DataRowMessage val] end
 
-  new create(c: BEConnection tag) =>
+  new create(c: BEConnection tag, batch: Bool = true) =>
+    _batch = batch 
     _conn = c
 
   be received(data: Array[U8] iso) =>
@@ -29,9 +33,21 @@ actor Listener
     r.append(data')
     while r.size() > _clen do
       match parse_response()
-      | let result: PGParseError val => _conn.log(result.msg)
+      | let result: PGParseError val => Debug.out(result.msg);_conn.log(result.msg)
       | let result: ParsePending val => return
-      | let result: ServerMessage val => _conn.received(result)
+      | let result: DataRowMessage val =>
+        if _batch then
+          try (_rows as Array[DataRowMessage val] trn).push(result) end
+        else
+          _conn.received(result)
+        end 
+      | let result: ServerMessage val =>
+        if _batch and (_rows.size() > 0) then
+          _rows = recover val _rows end
+          let rows = _rows = recover trn Array[DataRowMessage val] end
+          _conn.received(BatchRowMessage(rows))
+        end
+        _conn.received(result)
       end
    end
 
@@ -80,6 +96,7 @@ actor Listener
     | 'S' => parse_parameter_status()
     | 'T' => parse_row_description()
     | 'Z' => parse_ready_for_query()
+    | 's' => PortalSuspendedMessage
     else
       try r.block(_clen-4) else return PGParseError("") end
       let ret = PGParseError("Unknown message ID " + _ctype.string())

@@ -73,20 +73,74 @@ actor AuthConversation is Conversation
       _conn.handle_message(m)
     end
 
+
+trait FetchStatus
+
+primitive _Sending is FetchStatus
+primitive _Paused is FetchStatus
+primitive _Suspended is FetchStatus
+
+type Sending is _Sending val
+type Paused is _Paused val
+type Suspended is _Suspended val
+
+actor RecordIterator
+  let _notify: FetchNotify ref
+  let _conversation: FetchConversation tag
+
+  new create(n: FetchNotify iso, c: FetchConversation) =>
+    _notify = consume n
+    _conversation = c
+    _conversation.start()
+
+  be batch(b: Array[Record val] val) =>
+    for r in b.values() do
+      _notify.record(r)
+    end
+    _conversation.start()
+
+  be record(r: Record val) =>
+    _notify.record(r)
+    _conversation.start()
+
+  be stop() => _notify.stop()
+
+
 actor FetchConversation is Conversation
   let query: String val
   let params: Array[PGValue] val
   let _conn: BEConnection tag
-  let _notify: FetchNotify ref
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
+  var _buffer: (Array[Record val] trn | Array[Record val] val)
+  var status: FetchStatus val= Paused
+  let _iterator: RecordIterator tag
+  let _size: USize
 
   new create(c: BEConnection tag, q: String,
              n: FetchNotify iso, p: Array[PGValue] val) =>
     query = q
     params = p
     _conn = c
-    _notify = consume n
+    let notify = consume n
+    _size = notify.size()
+    _buffer = recover trn Array[Record val] end
+    _iterator = RecordIterator(consume notify, this)
+
+  be start() => 
+    if status is Suspended then _execute() end
+    if _buffer.size() > 0 then
+       /*Debug.out("Batch " + _buffer.size().string())*/
+       _buffer = recover val _buffer end
+       let b = _buffer = recover trn Array[Record val] end
+       status = Paused
+       _iterator.batch(b)
+    end
+    status = Sending
+
+  be pause() =>
+    /*Debug.out("paused")*/
+    if status is Sending then status = Paused end
 
   be log(msg: String) => _conn.log(msg)
 
@@ -98,6 +152,8 @@ actor FetchConversation is Conversation
 
   be apply(c: BEConnection tag) =>
     c.writev(recover val ParseMessage(query, "", TypeOids(params)).done() end)
+    _bind()
+    _describe()
     _flush()
 
   be _bind() =>
@@ -105,8 +161,8 @@ actor FetchConversation is Conversation
     _flush()
 
   be _execute() =>
-    let s = _notify.size()
-    _conn.writev(recover val ExecuteMessage("", s).done() end)
+    /*Debug.out("execute")*/
+    _conn.writev(recover val ExecuteMessage("", _size).done() end)
     _flush()
 
   be _describe() =>
@@ -118,23 +174,49 @@ actor FetchConversation is Conversation
     _flush()
 
   be row(m: DataRowMessage val) =>
+    _handle_row(m)
+
+  fun ref _handle_row(m: DataRowMessage val) =>
+    /*Debug.out("row")*/
     try
       let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-      _notify.record(record) 
+      if status is Sending then
+        /*Debug.out("Sending")*/
+        status = Paused
+        _iterator.record(record) 
+      else
+        /*Debug("Buffer")*/
+        try (_buffer as Array[Record val] trn).push(record) end
+      end
     end
+
+  be batch(rows: Array[DataRowMessage val] val) =>
+    for row' in rows.values() do
+      _handle_row(row')
+    end
+
 
   be message(m: ServerMessage val)=>
     match m
-    | let r: ParseCompleteMessage val => _bind()
+    | let r: ParseCompleteMessage val => None //_bind()
     | let r: CloseCompleteMessage val => _sync()
-    | let r: BindCompleteMessage val => _describe()
+    | let r: BindCompleteMessage val => None //_describe()
     | let r: ReadyForQueryMessage val => _conn.next()
+    | let r: BatchRowMessage val =>
+      for row' in r.rows.values() do
+        row(row')
+      end
+      //batch(r.rows)
     | let r: RowDescriptionMessage val =>
       _tuple_desc = r.tuple_desc
       _execute()
     | let r: DataRowMessage val => row(r)
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
-    | let r: CommandCompleteMessage val => _notify.stop(); _close()
+    | let r: CommandCompleteMessage val => _iterator.stop(); _close()
+    | let r: PortalSuspendedMessage val => match status
+      | Sending => _execute()
+      | Paused => status = Suspended
+      end
     else
       _conn.handle_message(m)
     end
@@ -186,7 +268,6 @@ actor ExecuteConversation is Conversation
       let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
       (_rows as Rows trn).push(res)
     end
-
 
   be call_back() =>
     // TODO; don't fail silently

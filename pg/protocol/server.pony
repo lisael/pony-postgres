@@ -8,6 +8,10 @@ class NullServerMessage is ServerMessage
   fun string(): String => "Null"
 class ConnectionClosedMessage is ServerMessage
   fun string(): String => "Connection closed"
+class BatchRowMessage is ServerMessage
+  let rows: Array[DataRowMessage val] val
+  new val create(rows': Array[DataRowMessage val] val) => rows = rows'
+  fun string(): String => "BatchRowMessage"
 
 // messages descirbed in https://www.postgresql.org/docs/current/static/protocol-message-formats.html
 class AuthenticationOkMessage is ServerMessage
@@ -22,6 +26,8 @@ class BindCompleteMessage is ServerMessage
   fun string(): String => "Bind complete"
 class CloseCompleteMessage is ServerMessage
   fun string(): String => "Close complete"
+class PortalSuspendedMessage is ServerMessage
+  fun string(): String => "Portal Suspended"
 class MD5PwdRequest is ServerMessage
   let salt: Array[U8] val
   new val create(salt': Array[U8] val)=>
