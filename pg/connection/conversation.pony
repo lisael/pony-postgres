@@ -94,12 +94,17 @@ actor RecordIterator
     _conversation.start()
 
   be batch(b: Array[Record val] val) =>
+    Debug.out(b.size())
+    var s = b.size()
     for r in b.values() do
       _notify.record(r)
+      s = s-1
+      /*if s == 0 then _conversation.start() end*/
     end
-    _conversation.start()
+		_conversation.start()
 
   be record(r: Record val) =>
+    Debug.out("record")
     _notify.record(r)
     _conversation.start()
 
@@ -142,6 +147,53 @@ actor FetchConversation is Conversation
     /*Debug.out("paused")*/
     if status is Sending then status = Paused end
 
+  be row(m: DataRowMessage val) =>
+    Debug.out("row")
+    _handle_row(m)
+
+  fun ref _handle_row(m: DataRowMessage val) =>
+    try
+      let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
+      if status is Sending then
+        /*Debug.out("Sending")*/
+        status = Paused
+        _iterator.record(record) 
+      else
+        /*Debug("Buffer")*/
+        (_buffer as Array[Record val] trn).push(record)
+      end
+    end
+
+  be batch(rows: Array[DataRowMessage val] val) =>
+    for row' in rows.values() do
+      _handle_row(row')
+    end
+
+
+  be message(m: ServerMessage val)=>
+    match m
+    | let r: ParseCompleteMessage val => None //_bind()
+    | let r: CloseCompleteMessage val => _sync()
+    | let r: BindCompleteMessage val => None //_describe()
+    | let r: ReadyForQueryMessage val => _conn.next()
+    | let r: BatchRowMessage val =>
+      for row' in r.rows.values() do
+        row(row')
+      end
+      //batch(r.rows)
+    | let r: RowDescriptionMessage val =>
+      _tuple_desc = r.tuple_desc
+      _execute()
+    | let r: EmptyQueryResponse val => Debug.out("Empty Query")
+    | let r: CommandCompleteMessage val => _iterator.stop(); _close()
+    | let r: PortalSuspendedMessage val => match status
+      | Sending => Debug.out("continue");_execute()
+      | Paused => Debug.out("suspend");status = Suspended
+      end
+    else
+      _conn.handle_message(m)
+    end
+
   be log(msg: String) => _conn.log(msg)
 
   fun _sync() =>
@@ -172,54 +224,6 @@ actor FetchConversation is Conversation
   be _close() =>
     _conn.writev(recover val CloseMessage('P', "").done() end)
     _flush()
-
-  be row(m: DataRowMessage val) =>
-    _handle_row(m)
-
-  fun ref _handle_row(m: DataRowMessage val) =>
-    /*Debug.out("row")*/
-    try
-      let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-      if status is Sending then
-        /*Debug.out("Sending")*/
-        status = Paused
-        _iterator.record(record) 
-      else
-        /*Debug("Buffer")*/
-        try (_buffer as Array[Record val] trn).push(record) end
-      end
-    end
-
-  be batch(rows: Array[DataRowMessage val] val) =>
-    for row' in rows.values() do
-      _handle_row(row')
-    end
-
-
-  be message(m: ServerMessage val)=>
-    match m
-    | let r: ParseCompleteMessage val => None //_bind()
-    | let r: CloseCompleteMessage val => _sync()
-    | let r: BindCompleteMessage val => None //_describe()
-    | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: BatchRowMessage val =>
-      for row' in r.rows.values() do
-        row(row')
-      end
-      //batch(r.rows)
-    | let r: RowDescriptionMessage val =>
-      _tuple_desc = r.tuple_desc
-      _execute()
-    | let r: DataRowMessage val => row(r)
-    | let r: EmptyQueryResponse val => Debug.out("Empty Query")
-    | let r: CommandCompleteMessage val => _iterator.stop(); _close()
-    | let r: PortalSuspendedMessage val => match status
-      | Sending => _execute()
-      | Paused => status = Suspended
-      end
-    else
-      _conn.handle_message(m)
-    end
 
 actor ExecuteConversation is Conversation
   let query: String val
@@ -285,7 +289,10 @@ actor ExecuteConversation is Conversation
     | let r: RowDescriptionMessage val =>
       _tuple_desc = r.tuple_desc
       _execute()
-    | let r: DataRowMessage val => row(r)
+    | let r: BatchRowMessage val =>
+      for row' in r.rows.values() do
+        row(row')
+      end
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
     | let r: CommandCompleteMessage val => call_back(); _close()
     else
@@ -320,6 +327,7 @@ actor QueryConversation is Conversation
     try
       let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
       (_rows as Rows trn).push(res)
+      Debug.out(res(0))
     end
 
   be message(m: ServerMessage val)=>
@@ -328,7 +336,11 @@ actor QueryConversation is Conversation
     | let r: CommandCompleteMessage val => call_back(); Debug.out(r.command)
     | let r: ReadyForQueryMessage val => _conn.next()
     | let r: RowDescriptionMessage val => _tuple_desc = r.tuple_desc
-    | let r: DataRowMessage val => row(r)
+    | let r: BatchRowMessage val =>
+      Debug.out("Batch: " + r.rows.size().string() + " rows")
+      for row' in r.rows.values() do
+        row(row')
+      end
     else
       _conn.handle_message(m)
     end

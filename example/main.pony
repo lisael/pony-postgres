@@ -24,7 +24,7 @@ class BlogEntry
     field3 = f3
 
   fun string(): String =>
-    "BlogEntry " + field1.string() + " "+ field2.string() + " "+ field3.string() + " "
+    "BlogEntry " + field1.string() + " " + field2.string() + " " + field3.string()
 
 class User
   let id: I32
@@ -37,7 +37,7 @@ class BlogEntryRecordNotify is FetchNotify
   let view: BlogEntriesView tag
   new iso create(v: BlogEntriesView tag) => view = v
   fun ref descirption(desc: RowDescription) => None
-  fun size(): USize => 100000
+  fun size(): USize => 10000
   fun ref record(r: Record val) =>
     try
        let e = recover val BlogEntry(
@@ -113,19 +113,30 @@ actor BlogEntriesView
 
 actor Main
   let session: Session
+  let _env: Env
 
   new create(env: Env) =>
+    _env = env
     session = Session(env where user="macflytest",
                    password=EnvPasswordProvider(env),
                    database="macflytest")
-
     let that = recover tag this end
+    session.execute("SELECT generate_series(0,10)",
+             recover val
+              lambda(r: Rows val)(that) =>
+                that.raw_count(r)
+                None
+              end
+             end)
+    """
+
     session.execute("SELECT 42, 24 as foo;;",
              recover val
               lambda(r: Rows val)(that) =>
                   that.raw_handler(r)
               end
              end)
+
 
     session.execute("SELECT $1, $2 as foo",
                     recover val
@@ -134,12 +145,15 @@ actor Main
                       end
                     end,
                    recover val [as PGValue: I32(70000), I32(-100000)] end)
-
     let p = session.connect(recover val
       lambda(c: Connection tag) =>
         BlogEntriesView(c)
       end
     end) 
+    """
+
+  be raw_count(rows: Rows val) =>
+    _env.out.print(rows.size().string())
 
   be raw_handler(rows: Rows val) =>
     for row in rows.values() do

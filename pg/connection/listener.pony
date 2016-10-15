@@ -20,35 +20,57 @@ actor Listener
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
-  var _batch: Bool = false
+  var _batch_size: USize = 0 // group rows in batch of this size. If 0, the
+                             // batch ends only when the DataRowMessages stop.
   var _rows: (Array[DataRowMessage val] trn | Array[DataRowMessage val] val) =
     recover trn Array[DataRowMessage val] end
 
-  new create(c: BEConnection tag, batch: Bool = true) =>
-    _batch = batch 
+  new create(c: BEConnection tag) =>
     _conn = c
+
+  be batch_size(s: USize) =>
+    _batch_size = s
+
+  fun ref _batch_send() =>
+    _rows = recover val _rows end
+    let rows = _rows = recover trn Array[DataRowMessage val] end
+    Debug.out("Send Batch: " + rows.size().string() + " rows")
+    _conn.received(BatchRowMessage(rows))
 
   be received(data: Array[U8] iso) =>
     let data' = recover val (consume data).slice() end
     r.append(data')
-    while r.size() > _clen do
+
+    // don't use  while r.size() <= _clen do, because the
+    // continue is unconditionnal.
+    while true do
+      Debug.out("connection buffer size: " + r.size().string()) 
       match parse_response()
       | let result: PGParseError val => Debug.out(result.msg);_conn.log(result.msg)
       | let result: ParsePending val => return
       | let result: DataRowMessage val =>
-        if _batch then
-          try (_rows as Array[DataRowMessage val] trn).push(result) end
-        else
-          _conn.received(result)
-        end 
+        try (_rows as Array[DataRowMessage val] trn).push(result) end
+        if _batch_size > 0 then
+          if
+            (r.size() < 5) // not enough bytes remain in the buffer, let's
+                           // send the batch while we're waiting for more
+              or
+            (_rows.size() >= _batch_size) // max_size reached, send the batch
+          then
+            _batch_send()
+          else
+            continue
+          end
+        end
       | let result: ServerMessage val =>
-        if _batch and (_rows.size() > 0) then
-          _rows = recover val _rows end
-          let rows = _rows = recover trn Array[DataRowMessage val] end
-          _conn.received(BatchRowMessage(rows))
+        // if some messages are still in the batch, there's something new, here.
+        // we first empty the batch
+        if (_rows.size() > 0) then
+          _batch_send()
         end
         _conn.received(result)
       end
+      if r.size() <= _clen then break end
    end
 
   be terminate() =>

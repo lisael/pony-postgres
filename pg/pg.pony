@@ -24,17 +24,51 @@ actor Session
   let _mgr: ConnectionManager
 
   new create(env: Env,
-             host: String="",
-             service: String="5432",
+             host: (String | None) = None,
+             service: (String| None) = None,
              user: (String | None) = None,
              password: (String | PasswordProvider tag) = "",
-             database: String = "") =>
+             database: (String | None) = None
+             ) =>
     _env = env
 
-    // retreive the user from the env if not provided
-    let user' = try user as String else
-      try EnvVars(env.vars())("USER") else "" end
-    end
+    // retreive the connection parameters from env if not provided
+    // TODO: we should implement all options of libpq as well :
+    // https://www.postgresql.org/docs/current/static/libpq-envars.html
+
+    let user' = try
+      user as String
+    else try
+      EnvVars(env.vars())("PGUSER")
+    else try
+      EnvVars(env.vars())("USER")
+    else
+      ""
+    end end end
+
+    let host' = try
+      host as String
+    else try
+      EnvVars(env.vars())("PGHOST")
+    else
+      "localhost"
+    end end
+
+    let service' = try
+      service as String
+    else try
+      EnvVars(env.vars())("PGPORT")
+    else
+      "5432"
+    end end
+
+    let database' = try
+      database as String
+    else try
+      EnvVars(env.vars())("PGDATABASE")
+    else
+      user'
+    end end
 
     // Define the password strategy
     let provider = match password
@@ -44,8 +78,8 @@ actor Session
         RawPasswordProvider("")
       end
 
-    _mgr = ConnectionManager(host, service, user', provider, 
-      recover val [("user", user'), ("database", database)] end)
+    _mgr = ConnectionManager(host', service', user', provider, 
+      recover val [("user", user'), ("database", database')] end)
 
   be log(msg: String) =>
     _env.out.print(msg)
