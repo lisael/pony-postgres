@@ -1,6 +1,7 @@
 use "buffered"
 use "collections"
 use "debug"
+use "net"
 
 use "pg/protocol"
 use "pg/introspect"
@@ -15,21 +16,26 @@ class PGParseError is ParseEvent
     msg = msg'
 
 
-actor Listener
-  let _conn: BEConnection tag
+class PGNotify is TCPConnectionNotify
+
+  let _conn: _Connection tag
   var r: Reader iso = Reader // current reader
   var _ctype: U8 = 0 // current type (keep it if the data is chuncked)
   var _clen: USize = 0 // current message len (as given by server)
-  var _batch_size: USize = 0 // group rows in batch of this size. If 0, the
+  var _batch_size: USize = 1000 // group rows in batch of this size. If 0, the
                              // batch ends only when the DataRowMessages stop.
   var _rows: (Array[DataRowMessage val] trn | Array[DataRowMessage val] val) =
     recover trn Array[DataRowMessage val] end
 
-  new create(c: BEConnection tag) =>
-    _conn = c
+  fun ref connected(conn: TCPConnection ref) =>
+    _conn.connected()
 
-  be batch_size(s: USize) =>
-    _batch_size = s
+  fun ref closed(conn: TCPConnection ref) =>
+    terminate()
+    _conn.received(ConnectionClosedMessage)
+
+  new iso create(c: _Connection tag) =>
+    _conn = c
 
   fun ref _batch_send() =>
     _rows = recover val _rows end
@@ -37,18 +43,19 @@ actor Listener
     Debug.out("Send Batch: " + rows.size().string() + " rows")
     _conn.received(BatchRowMessage(rows))
 
-  be received(data: Array[U8] iso) =>
+  fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
     let data' = recover val (consume data).slice() end
     r.append(data')
 
     // don't use  while r.size() <= _clen do, because the
     // continue is unconditionnal.
     while true do
-      Debug.out("connection buffer size: " + r.size().string()) 
+      //Debug.out("connection buffer size: " + r.size().string()) 
       match parse_response()
       | let result: PGParseError val => Debug.out(result.msg);_conn.log(result.msg)
       | let result: ParsePending val => return
       | let result: DataRowMessage val =>
+        //Debug.out("Row")
         try (_rows as Array[DataRowMessage val] trn).push(result) end
         if _batch_size > 0 then
           if
@@ -73,7 +80,7 @@ actor Listener
       if r.size() <= _clen then break end
    end
 
-  be terminate() =>
+  fun ref terminate() =>
     if _ctype == 'E' then
       r.append(recover Array[U8].init(0, _clen - r.size()) end)
       try _conn.received(recover val parse_response() end as ServerMessage val) end
@@ -141,7 +148,7 @@ actor Listener
         for n in Range(0, n_fields.usize()) do
           let len = r.i32_be()
           let data = recover val r.block(len.usize()) end
-          fields.push(recover val FieldData(len, data) end)
+          fields.push(recover val FieldData(len, recover val Array[U8].append(consume data) end) end)
         end
         fields
         end
@@ -213,8 +220,8 @@ actor Listener
         return PGParseError("Malformed parameter message")
       end
     ParameterStatusMessage(
-      recover val item.trim(0, end_idx) end,
-      recover val item.trim(end_idx + 1) end)
+      recover val Array[U8].append(item.trim(0, end_idx)) end,
+      recover val Array[U8].append(item.trim(end_idx + 1)) end)
 
   fun ref parse_auth_resp(): ServerMessage val =>
     /*Debug.out("parse_auth_resp")*/

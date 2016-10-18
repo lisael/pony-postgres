@@ -37,8 +37,14 @@ class BlogEntryRecordNotify is FetchNotify
   let view: BlogEntriesView tag
   new iso create(v: BlogEntriesView tag) => view = v
   fun ref descirption(desc: RowDescription) => None
-  fun size(): USize => 10000
+  fun size(): USize => 10
+  fun ref batch(r: Array[Record val] val, next: FetchNotifyNext val) =>
+    Debug.out("Batch")
+    if r.size() == size() then
+      next(None)
+    end
   fun ref record(r: Record val) =>
+    Debug.out(".")
     try
        let e = recover val BlogEntry(
           r(0) as I32,
@@ -46,7 +52,7 @@ class BlogEntryRecordNotify is FetchNotify
           /*r(1) as I32,*/
           /*r(2) as I32*/
         ) end
-      Debug.out(e.string())
+      // Debug.out(e.string())
       /*(entries as Array[BlogEntry val] trn).push(e)*/
 
     end
@@ -62,6 +68,17 @@ class UserRecordNotify is FetchNotify
   let view: BlogEntriesView tag
   new create(v: BlogEntriesView tag) => view = v
   fun ref descirption(desc: RowDescription) => None
+
+  fun ref batch(b: Array[Record val] val, next: FetchNotifyNext val) =>
+    Debug(b.size())
+    for r in b.values() do
+      try
+        view.user(recover User(r("id") as I32) end)
+      else
+        Debug.out("Error")
+      end
+    end
+
   fun ref record(r: Record val) =>
     try
       view.user(recover User(r("id") as I32) end)
@@ -76,9 +93,10 @@ actor BlogEntriesView
 
   be fetch_entries() =>
     try
+      Debug("fetch_entries")
       (_conn as Connection).fetch(
         /*"SELECT 1 as user_id, 2, 3 UNION ALL SELECT 4 as user_id, 5, 6 UNION ALL SELECT 7 as user_id, 8, 9",*/
-        "SELECT generate_series(0,1000000)",
+        "SELECT generate_series(0,100)",
         recover BlogEntryRecordNotify(this) end)
     end
 
@@ -91,6 +109,7 @@ actor BlogEntriesView
 
   be user(u: User iso) =>
     _user = recover val consume u end
+    Debug.out("###")
     fetch_entries()
 
   be render(entries': Array[BlogEntry val] val) =>
@@ -121,14 +140,14 @@ actor Main
                    password=EnvPasswordProvider(env),
                    database="macflytest")
     let that = recover tag this end
-    session.execute("SELECT generate_series(0,10)",
+    """
+    session.execute("SELECT generate_series(0,1)",
              recover val
               lambda(r: Rows val)(that) =>
                 that.raw_count(r)
                 None
               end
              end)
-    """
 
     session.execute("SELECT 42, 24 as foo;;",
              recover val
@@ -145,12 +164,12 @@ actor Main
                       end
                     end,
                    recover val [as PGValue: I32(70000), I32(-100000)] end)
+    """
     let p = session.connect(recover val
       lambda(c: Connection tag) =>
         BlogEntriesView(c)
       end
     end) 
-    """
 
   be raw_count(rows: Rows val) =>
     _env.out.print(rows.size().string())

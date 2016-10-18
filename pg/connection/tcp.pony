@@ -22,40 +22,11 @@ interface BEConnection
   be fetch(query: String, notify: FetchNotify iso,
            params: (Array[PGValue] val | None) = None)
 
-class PGNotify is TCPConnectionNotify
-  let _conn: _Connection
-  let _listener: Listener
-
-  new iso create(c: _Connection, l: Listener) =>
-    _conn = c
-    _listener = l
-
-  fun ref connected(conn: TCPConnection ref) =>
-    _conn.connected()
-
-  fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
-    // Debug.out("received")
-    _listener.received(consume data)
-
-  fun ref closed(conn: TCPConnection ref) =>
-    /*_listener.received(recover [as U8: 0, 0, 0, 0, 0]end)*/
-    _listener.terminate()
-    _conn.received(ConnectionClosedMessage)
-
-  /*fun ref sent(conn: TCPConnection ref, data: (String val | Array[U8 val] val)): (String val | Array[U8 val] val) =>*/
-    /*Debug.out("send")*/
-    /*match data*/
-    /*| let s: String val => for c in s.values() do Debug.out(c) end*/
-    /*| let s: Array[U8 val] val => for c in s.values() do Debug.out(c) end*/
-    /*end*/
-    /*conn.write_final(data)*/
-    /*""*/
 
 actor _Connection is BEConnection
   let _conn: TCPConnection tag
   var _fe: ( Connection tag | None) = None // front-end connection
   let _pool: ConnectionManager tag
-  let _listener: Listener tag
   let _params: Array[(String, String)] val
   var _convs: List[Conversation tag] = List[Conversation tag]
   var _current: Conversation tag
@@ -66,8 +37,7 @@ actor _Connection is BEConnection
              service: String,
              params: Array[(String, String)] val,
              pool: ConnectionManager) =>
-    _listener = Listener(this)
-    _conn = TCPConnection(auth, PGNotify(this, _listener), host, service)
+    _conn = TCPConnection(auth, PGNotify(this), host, service)
     _pool = pool
     _params = params
     _current = AuthConversation(_pool, this, _params)
@@ -132,7 +102,7 @@ actor _Connection is BEConnection
     None
 
   be received(s: ServerMessage val) =>
-    // Debug.out("recieved " + s.string())
+    Debug.out("recieved " + s.string())
     _current.message(s)
 
   be _log_error(m: ErrorMessage val) =>
@@ -163,6 +133,3 @@ actor _Connection is BEConnection
 
   be set_frontend(c: Connection tag) =>
     _fe = c
-
-
-

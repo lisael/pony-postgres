@@ -2,9 +2,13 @@ use "debug"
 use "pg/connection"
 use "pg/introspect"
 
+
+type FetchNotifyNext is {((FetchNotify iso | None))}
+
 interface FetchNotify
   fun ref descirption(desc: RowDescription) => None
   fun ref record(r: Record val) => None
+  fun ref batch(r: Array[Record val] val, next: FetchNotifyNext val) => None
   fun ref stop() => None
   fun size(): USize => 30
 

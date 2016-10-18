@@ -42,26 +42,37 @@ primitive TypeOids
     end
 
 primitive Decode
-  fun apply(type_oid: I32, value: Array[U8] val, 0): PGValue ? =>
-    DecodeText(type_oid, value)
-  fun apply(type_oid: I32, value: Array[U8] val, 1): PGValue ? =>
-    DecodeBinary(type_oid, value)
-  fun apply(type_oid: I32, value: Array[U8] val, format: I16): PGValue ? => error
+  fun apply(type_oid: I32, value: Array[U8] val, format: I16): PGValue ? =>
+    if format == 0 then
+      DecodeText(type_oid, value)
+    else if format == 1 then
+      DecodeBinary(type_oid, value)
+    else
+      Debug.out("Unknown fromat" + format.string())
+      error
+    end end
 
 primitive DecodeText
-  fun apply(23, value: Array[U8] val): I32 ? =>
-    String.from_array(value).i32()
-  fun apply(type_oid: I32, value: Array[U8] val) ? => Debug.out("Unknown type OID: " + type_oid.string()); error
+  fun apply(type_oid: I32, value: Array[U8] val): PGValue ? =>
+    match type_oid
+    | 23 => String.from_array(value).i32()
+    else
+      Debug.out("Unknown type OID: " + type_oid.string()); error
+    end
 
 primitive DecodeBinary
-  fun apply(23, value: Array[U8] val): I32 ? => 
-    var result = I32(0)
-    for i in value.values() do
-      result = (result << 8) + i.i32()
+  fun apply(type_oid: I32, value: Array[U8] val): PGValue ? =>
+    match type_oid
+    | 23 => 
+      var result = I32(0)
+      for i in value.values() do
+        result = (result << 8) + i.i32()
+      end
+      result
+    else
+      Debug.out("Unknown type OID: " + type_oid.string()); error
     end
-    result
     
-  fun apply(type_oid: I32, value: Array[U8] val) ? => Debug.out("Unknown type OID: " + type_oid.string()); error
 
 primitive EncodeBinary
   fun apply(param: I32, writer: Writer) ? =>
