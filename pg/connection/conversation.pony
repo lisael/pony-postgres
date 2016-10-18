@@ -1,5 +1,6 @@
 use "debug"
 use "crypto"
+use "logger"
 
 use "pg/protocol"
 use "pg/codec"
@@ -94,15 +95,17 @@ actor FetchConversation is Conversation
   let _buffers: Array[Array[Record val] val] = Array[Array[Record val] val]
   var _notify: (FetchNotify iso | None) 
   let _size: USize
+  let logger: Logger[String val] val
 
   new create(c: BEConnection tag, q: String,
-             n: FetchNotify iso, p: Array[PGValue] val) =>
+             n: FetchNotify iso, p: Array[PGValue] val, out: OutStream) =>
     query = q
     params = p
     _conn = c
     _size = n.size()
     _notify = consume n
     _buffer = recover trn Array[Record val] end
+    logger = StringLogger(Warn, out)
 
   be _batch(b: BatchRowMessage val) =>
     Debug.out(query)
@@ -130,6 +133,7 @@ actor FetchConversation is Conversation
     try (_notify as FetchNotify iso).stop() end
     
   be _send() =>
+    logger(Fine) and logger.log("coucou")
     _do_send()
 
   fun ref _do_send() =>
@@ -161,6 +165,7 @@ actor FetchConversation is Conversation
       //end
       _batch(r)
     | let r: RowDescriptionMessage val =>
+      Debug.out("row_desc")
       _tuple_desc = r.tuple_desc
       _execute()
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
@@ -168,39 +173,43 @@ actor FetchConversation is Conversation
       _send()
       _stop()
       _close()
-    | let r: PortalSuspendedMessage val =>  None
+    | let r: PortalSuspendedMessage val =>  _send()
     else
       _conn.handle_message(m)
     end
 
   be log(msg: String) => _conn.log(msg)
 
-  fun _sync() =>
+  be _sync() =>
+    Debug.out("sync")
     _conn.writev(recover val SyncMessage.done() end)
 
-  fun _flush() =>
+  be _flush() =>
+    Debug.out("flush")
     _conn.writev(recover val FlushMessage.done() end)
 
   be apply(c: BEConnection tag) =>
+    Debug.out("apply")
     c.writev(recover val ParseMessage(query, "", TypeOids(params)).done() end)
     _bind()
     _describe()
-    _flush()
 
   be _bind() =>
+    Debug.out("bind")
     _conn.writev(recover val BindMessage("", "", params).done() end)
-    _flush()
 
   be _execute() =>
-    /*Debug.out("execute")*/
+    Debug.out("execute")
     _conn.writev(recover val ExecuteMessage("", _size).done() end)
     _flush()
 
   be _describe() =>
+    Debug.out("describe")
     _conn.writev(recover val DescribeMessage('P', "").done() end)
     _flush()
 
   be _close() =>
+    Debug.out("close")
     _conn.writev(recover val CloseMessage('P', "").done() end)
     _flush()
 

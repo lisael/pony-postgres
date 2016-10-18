@@ -8,6 +8,7 @@ use "debug"
 
 use "pg/protocol"
 use "pg/connection"
+use "logger"
 
 
 interface _StringCB
@@ -22,6 +23,7 @@ type Param is (String, String)
 actor Session
   let _env: Env
   let _mgr: ConnectionManager
+  let logger: Logger[String val] val
 
   new create(env: Env,
              host: (String | None) = None,
@@ -31,6 +33,7 @@ actor Session
              database: (String | None) = None
              ) =>
     _env = env
+    logger = StringLogger(Fine, env.out)
 
     // retreive the connection parameters from env if not provided
     // TODO: we should implement all options of libpq as well :
@@ -79,7 +82,7 @@ actor Session
       end
 
     _mgr = ConnectionManager(host', service', user', provider, 
-      recover val [("user", user'), ("database", database')] end)
+      recover val [("user", user'), ("database", database')] end, env.out)
 
   be log(msg: String) =>
     _env.out.print(msg)

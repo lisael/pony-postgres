@@ -1,6 +1,7 @@
 use "net"
 use "collections"
 use "debug"
+use "logger"
 
 use "pg/introspect"
 use "pg/protocol"
@@ -31,16 +32,22 @@ actor _Connection is BEConnection
   var _convs: List[Conversation tag] = List[Conversation tag]
   var _current: Conversation tag
   var _backend_key: (U32, U32) = (0, 0)
+  let out: OutStream
+  let logger: Logger[String val] val
   
   new create(auth: AmbientAuth,
              host: String,
              service: String,
              params: Array[(String, String)] val,
-             pool: ConnectionManager) =>
+             pool: ConnectionManager,
+             out': OutStream
+             ) =>
     _conn = TCPConnection(auth, PGNotify(this), host, service)
     _pool = pool
     _params = params
     _current = AuthConversation(_pool, this, _params)
+    out = out'
+    logger = StringLogger(Warn, out)
 
   be writev(data: ByteSeqIter) =>
     _conn.writev(data)
@@ -72,7 +79,7 @@ actor _Connection is BEConnection
            params as Array[PGValue] val
          else
            recover val Array[PGValue] end
-         end
+         end, out
        )
      )
 
@@ -102,7 +109,7 @@ actor _Connection is BEConnection
     None
 
   be received(s: ServerMessage val) =>
-    Debug.out("recieved " + s.string())
+    logger(Fine) and logger.log("recieved " + s.string())
     _current.message(s)
 
   be _log_error(m: ErrorMessage val) =>
@@ -112,7 +119,6 @@ actor _Connection is BEConnection
       s.append(": ")
       s.append(text)
       Debug.out(consume s)
-      /*log(consume s)*/
     end
 
   be handle_message(s: ServerMessage val) =>

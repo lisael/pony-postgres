@@ -7,6 +7,7 @@ use "pg"
 use "pg/codec"
 use "pg/introspect"
 use "net"
+use "logger"
 use "debug"
 use "promises"
 
@@ -35,12 +36,28 @@ class User
 class BlogEntryRecordNotify is FetchNotify
   var entries: (Array[BlogEntry val] trn | Array[BlogEntry val] val) = recover trn Array[BlogEntry val] end
   let view: BlogEntriesView tag
-  new iso create(v: BlogEntriesView tag) => view = v
+  let logger: Logger[String val] val
+  new iso create(v: BlogEntriesView tag, out: OutStream) =>
+    view = v
+    logger = StringLogger(Warn, out)
+
   fun ref descirption(desc: RowDescription) => None
   fun size(): USize => 10
-  fun ref batch(r: Array[Record val] val, next: FetchNotifyNext val) =>
-    Debug.out("Batch")
-    if r.size() == size() then
+  fun ref batch(b: Array[Record val] val, next: FetchNotifyNext val) =>
+    logger(Fine) and  logger.log("Fetch entries")
+    if b.size() == size() then
+      try
+        for r in b.values() do
+          let e = recover val BlogEntry(
+            r(0) as I32,
+            2, 3
+            /*r(1) as I32,*/
+            /*r(2) as I32*/
+          ) end
+          Debug.out(e.string())
+          (entries as Array[BlogEntry val] trn).push(e)
+        end
+      end
       next(None)
     end
   fun ref record(r: Record val) =>
@@ -66,7 +83,10 @@ class BlogEntryRecordNotify is FetchNotify
 class UserRecordNotify is FetchNotify
   let entries: Array[BlogEntry] = Array[BlogEntry]
   let view: BlogEntriesView tag
-  new create(v: BlogEntriesView tag) => view = v
+  let logger: Logger[String val] val
+  new create(v: BlogEntriesView tag, out: OutStream) =>
+    view = v
+    logger = StringLogger(Fine, out)
   fun ref descirption(desc: RowDescription) => None
 
   fun ref batch(b: Array[Record val] val, next: FetchNotifyNext val) =>
@@ -90,6 +110,12 @@ actor BlogEntriesView
   var _conn: (Connection tag | None) = None
   var _user: ( User val | None ) = None
   let _entries: Promise[Array[BlogEntry val] val] = Promise[Array[BlogEntry val] val]
+  let logger: Logger[String val] val
+  let out: OutStream
+
+  new create(o: OutStream) =>
+    out = o
+    logger = StringLogger(Fine, out)
 
   be fetch_entries() =>
     try
@@ -97,14 +123,14 @@ actor BlogEntriesView
       (_conn as Connection).fetch(
         /*"SELECT 1 as user_id, 2, 3 UNION ALL SELECT 4 as user_id, 5, 6 UNION ALL SELECT 7 as user_id, 8, 9",*/
         "SELECT generate_series(0,100)",
-        recover BlogEntryRecordNotify(this) end)
+        recover BlogEntryRecordNotify(this, out) end)
     end
 
   be fetch_user() =>
     try
       (_conn as Connection).fetch(
         "SELECT 1 as id",
-        recover UserRecordNotify(this) end)
+        recover UserRecordNotify(this, out) end)
     end
 
   be user(u: User iso) =>
@@ -114,10 +140,8 @@ actor BlogEntriesView
 
   be render(entries': Array[BlogEntry val] val) =>
     Debug.out("render")
-    for p in entries'.values() do
-      /*Debug.out(p.string())*/
-      None
-    end
+    try logger.log(entries'.size().string() + " " + entries'(0).string()) end
+    /*logger.log(entries'.size().string())*/
     try (_conn as Connection).release() end
 
   be entries(e: Array[BlogEntry val] val) =>
@@ -136,6 +160,7 @@ actor Main
 
   new create(env: Env) =>
     _env = env
+    let logger = StringLogger(Fine, env.out)
     session = Session(env where user="macflytest",
                    password=EnvPasswordProvider(env),
                    database="macflytest")
@@ -166,8 +191,8 @@ actor Main
                    recover val [as PGValue: I32(70000), I32(-100000)] end)
     """
     let p = session.connect(recover val
-      lambda(c: Connection tag) =>
-        BlogEntriesView(c)
+      lambda(c: Connection tag)(env) =>
+        BlogEntriesView(env.out)(c)
       end
     end) 
 

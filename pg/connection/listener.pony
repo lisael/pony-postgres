@@ -44,8 +44,10 @@ class PGNotify is TCPConnectionNotify
     _conn.received(BatchRowMessage(rows))
 
   fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
-    let data' = recover val (consume data).slice() end
-    r.append(data')
+    //let data' = recover val (consume data).slice() end
+    //r.append(data')
+    Debug.out("received")
+    r.append(consume data)
 
     // don't use  while r.size() <= _clen do, because the
     // continue is unconditionnal.

@@ -1,5 +1,6 @@
 use "collections"
 use "promises"
+use "logger"
 
 use "pg"
 
@@ -12,12 +13,15 @@ actor ConnectionManager
   let _passwd_provider: PasswordProvider tag
   var _password: (String | None) = None
   let _max_size: USize
+  let out: OutStream
+  let logger: Logger[String val] val
 
   new create(host: String,
              service: String,
              user: String,
              passwd_provider: PasswordProvider tag,
              params: Array[Param] val,
+             out': OutStream,
              pool_size: USize = 1
              ) =>
     _params = params
@@ -26,12 +30,14 @@ actor ConnectionManager
     _passwd_provider = passwd_provider
     _user = user
     _max_size = pool_size
+    out = out'
+    logger = StringLogger(Fine, out)
 
   be log(msg: String) =>
     None
 
   be connect(auth: AmbientAuth, f: ({(Connection tag):(Any)} val | Promise[Connection tag])) =>
-    let priv_conn=_Connection(auth, _host, _service, _params, this)
+    let priv_conn=_Connection(auth, _host, _service, _params, this, out)
     _connections.push(priv_conn)
     let conn = Connection(priv_conn)
     priv_conn.set_frontend(conn)
@@ -41,7 +47,7 @@ actor ConnectionManager
     end
 
   be connect_p(auth: AmbientAuth, f: {(Connection tag)} iso) =>
-    let priv_conn=_Connection(auth, _host, _service, _params, this)
+    let priv_conn=_Connection(auth, _host, _service, _params, this, out)
     _connections.push(priv_conn)
     let conn = Connection(priv_conn)
     priv_conn.set_frontend(conn)
