@@ -24,9 +24,10 @@ class PGNotify is TCPConnectionNotify
   var _clen: USize = 0 // current message len (as given by server)
   var _batch_size: USize = 1000 // group rows in batch of this size. If 0, the
                              // batch ends only when the DataRowMessages stop.
-  var _rows: (Array[DataRowMessage val] trn | Array[DataRowMessage val] val) =
-    recover trn Array[DataRowMessage val] end
+  var _rows: Array[DataRowMessage val] trn = recover trn Array[DataRowMessage val] end
 
+  fun ref connect_failed(conn: TCPConnection ref) => None
+    
   fun ref connected(conn: TCPConnection ref) =>
     _conn.connected()
 
@@ -38,12 +39,11 @@ class PGNotify is TCPConnectionNotify
     _conn = c
 
   fun ref _batch_send() =>
-    _rows = recover val _rows end
     let rows = _rows = recover trn Array[DataRowMessage val] end
     Debug.out("Send Batch: " + rows.size().string() + " rows")
-    _conn.received(BatchRowMessage(rows))
+    _conn.received(BatchRowMessage(consume rows))
 
-  fun ref received(conn: TCPConnection ref, data: Array[U8] iso) =>
+  fun ref received(conn: TCPConnection ref, data: Array[U8] iso, times: USize): Bool =>
     //let data' = recover val (consume data).slice() end
     //r.append(data')
     Debug.out("received")
@@ -55,10 +55,10 @@ class PGNotify is TCPConnectionNotify
       //Debug.out("connection buffer size: " + r.size().string()) 
       match parse_response()
       | let result: PGParseError val => Debug.out(result.msg);_conn.log(result.msg)
-      | let result: ParsePending val => return
+      | let result: ParsePending val => return true
       | let result: DataRowMessage val =>
         //Debug.out("Row")
-        try (_rows as Array[DataRowMessage val] trn).push(result) end
+        _rows.push(result)
         if _batch_size > 0 then
           if
             (r.size() < 5) // not enough bytes remain in the buffer, let's
@@ -66,6 +66,7 @@ class PGNotify is TCPConnectionNotify
               or
             (_rows.size() >= _batch_size) // max_size reached, send the batch
           then
+            Debug.out(r.size().string())
             _batch_send()
           else
             continue
@@ -75,12 +76,14 @@ class PGNotify is TCPConnectionNotify
         // if some messages are still in the batch, there's something new, here.
         // we first empty the batch
         if (_rows.size() > 0) then
+          Debug.out("servermessage")
           _batch_send()
         end
         _conn.received(result)
       end
       if r.size() <= _clen then break end
    end
+   true
 
   fun ref terminate() =>
     if _ctype == 'E' then
@@ -110,6 +113,7 @@ class PGNotify is TCPConnectionNotify
       /*Debug.out("  Pending (_clen: " + _clen.string() + ", r.size: " + r.size().string() + ")" )*/
       return ParsePending
     end
+    Debug(String.from_array(recover val [as U8: _ctype] end))
     let result = match _ctype
     | '1' => ParseCompleteMessage
     | '2' => BindCompleteMessage
@@ -150,7 +154,8 @@ class PGNotify is TCPConnectionNotify
         for n in Range(0, n_fields.usize()) do
           let len = r.i32_be()
           let data = recover val r.block(len.usize()) end
-          fields.push(recover val FieldData(len, recover val Array[U8].append(consume data) end) end)
+          // fields.push(recover val FieldData(len, recover val let a = Array[U8]; a.append(consume data); a end) end)
+          fields.push(recover val FieldData(len.i32(), data) end)
         end
         fields
         end
@@ -222,8 +227,8 @@ class PGNotify is TCPConnectionNotify
         return PGParseError("Malformed parameter message")
       end
     ParameterStatusMessage(
-      recover val Array[U8].append(item.trim(0, end_idx)) end,
-      recover val Array[U8].append(item.trim(end_idx + 1)) end)
+      recover val let a = Array[U8]; a.append(item.trim(0, end_idx)); a end,
+      recover val let a = Array[U8]; a.append(item.trim(end_idx + 1)); a end)
 
   fun ref parse_auth_resp(): ServerMessage val =>
     /*Debug.out("parse_auth_resp")*/
@@ -233,7 +238,7 @@ class PGNotify is TCPConnectionNotify
       let result: ServerMessage val = match msg_type // auth message type
       | 0 => AuthenticationOkMessage
       | 3 => ClearTextPwdRequest
-      | 5 => MD5PwdRequest(recover val [r.u8(), r.u8(), r.u8(), r.u8()] end)
+      | 5 => MD5PwdRequest(recover val [r.u8(); r.u8(); r.u8(); r.u8()] end)
       else 
         PGParseError("Unknown auth message")
       end

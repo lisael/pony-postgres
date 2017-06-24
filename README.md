@@ -25,6 +25,7 @@ of this PoC is to experiment user-facing API and internal design alternatives.
 
 ### Needed in the proof of concept
 
+- Cursors (prevents from loading the entire dataset of a result)
 - Prepared statements
 - Codecs for values
   - binary values first
@@ -43,7 +44,6 @@ of this PoC is to experiment user-facing API and internal design alternatives.
 - Get and set connection parameters (these are currently fetched from the
   server but not exposed on the API)
 - Transaction Management
-- Cursors (prevents from loading the entire dataset of a result)
 - Support logical decoding (I've already wrote a C/Python library for
   that, it's heavily asynchronous, it'll be a pleasure to do this in pony)
 

@@ -36,14 +36,14 @@ actor ConnectionManager
   be log(msg: String) =>
     None
 
-  be connect(auth: AmbientAuth, f: ({(Connection tag):(Any)} val | Promise[Connection tag])) =>
+  be connect(auth: AmbientAuth, f: ({(Connection tag):(Any)} val | Promise[Connection tag] val)) =>
     let priv_conn=_Connection(auth, _host, _service, _params, this, out)
     _connections.push(priv_conn)
     let conn = Connection(priv_conn)
     priv_conn.set_frontend(conn)
-    match f
+    match recover val f end
     | let f': Promise[Connection tag] => f'(conn)
-    | let f': {(Connection tag)} val => f'(conn)
+    | let f': {(Connection tag):(Any)} val => f'(conn)
     end
 
   be connect_p(auth: AmbientAuth, f: {(Connection tag)} iso) =>

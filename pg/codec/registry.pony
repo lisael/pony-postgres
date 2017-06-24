@@ -56,6 +56,7 @@ primitive DecodeText
   fun apply(type_oid: I32, value: Array[U8] val): PGValue ? =>
     match type_oid
     | 23 => String.from_array(value).i32()
+    //| 23 => I32(1)
     else
       Debug.out("Unknown type OID: " + type_oid.string()); error
     end
@@ -69,6 +70,7 @@ primitive DecodeBinary
         result = (result << 8) + i.i32()
       end
       result
+      // I32(1)
     else
       Debug.out("Unknown type OID: " + type_oid.string()); error
     end

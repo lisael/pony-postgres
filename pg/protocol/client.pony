@@ -7,37 +7,27 @@ use "pg"
 type _Param is (String, String)
 
 interface ClientMessage is Message
-  fun ref _zero()
-  fun ref _write(s: String) 
-  fun ref _u8(u: U8)
-  fun ref _i32(i: I32)
-  fun ref _i16(i: I16)
-  fun ref _parameter(p: PGValue)
-  fun ref _done(id: U8): Array[ByteSeq] iso^
+  fun ref _w(): Writer
+  fun ref _output(): Writer
   fun ref done(): Array[ByteSeq] iso^ => _done(0)
-  fun ref _debug(id: U8): Array[ByteSeq] iso^
 
-class ClientMessageBase is ClientMessage
-  var _w: Writer = Writer
-  var _out: Writer = Writer
-
-  fun ref _zero() => _w.u8(0)
-  fun ref _u8(u: U8) => _w.u8(u)
-  fun ref _write(s: String) => _w.write(s)
-  fun ref _i32(i: I32) => _w.i32_be(i)
-  fun ref _i16(i: I16) => _w.i16_be(i)
+  fun ref _zero() => _w().u8(0)
+  fun ref _u8(u: U8) => _w().u8(u)
+  fun ref _write(s: String) => _w().write(s)
+  fun ref _i32(i: I32) => _w().i32_be(i)
+  fun ref _i16(i: I16) => _w().i16_be(i)
   fun ref _parameter(p: PGValue) => 
     var param = recover ref Writer end
     try EncodeBinary(p, param) end
     _i32(param.size().i32())
-    _w.writev(param.done())
+    _w().writev(param.done())
 
   fun ref _debug(id: U8): Array[ByteSeq] iso^ =>
-    if id != 0 then _out.u8(id) end
-    _out.i32_be(_w.size().i32() + 4)
-    _out.writev(_w.done())
+    if id != 0 then _output().u8(id) end
+    _output().i32_be(_w().size().i32() + 4)
+    _output().writev(_w().done())
     let out = Reader
-    for s in _out.done().values() do
+    for s in _output().done().values() do
       try out.append(s as Array[U8] val) end
       try out.append((s  as String).array()) end
     end
@@ -51,12 +41,14 @@ class ClientMessageBase is ClientMessage
     w.done()
 
   fun ref _done(id: U8): Array[ByteSeq] iso^ =>
-    if id != 0 then _out.u8(id) end
-    _out.i32_be(_w.size().i32() + 4)
-    _out.writev(_w.done())
-    _out.done()
+    if id != 0 then _output().u8(id) end
+    _output().i32_be(_w().size().i32() + 4)
+    _output().writev(_w().done())
+    _output().done()
 
 class NullClientMessage is ClientMessage
+  fun ref _output(): Writer => Writer
+  fun ref _w(): Writer => Writer
   fun ref _zero() => None
   fun ref _write(s: String)  => None
   fun ref _u8(u: U8) => None
@@ -67,7 +59,10 @@ class NullClientMessage is ClientMessage
   fun ref _parameter(p: PGValue) => None
 
 class StartupMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
 
   new create(params: Array[_Param] box) =>
     _i32(196608) // protocol version 3.0
@@ -81,30 +76,53 @@ class StartupMessage is ClientMessage
     _write(key); _zero()
     _write(value); _zero()
 
-class FlushMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+class FlushMessage is ClientMessage
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
+
   fun ref done(): Array[ByteSeq] iso^ => _done('H') 
 
-class SyncMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+class SyncMessage is ClientMessage
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
+
   fun ref done(): Array[ByteSeq] iso^ => _done('S') 
 
-class TerminateMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+class TerminateMessage is ClientMessage
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
+
   fun ref done(): Array[ByteSeq] iso^ => _done('X') 
 
 class PasswordMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
+
   new create(pass: String) => _write(pass)
   fun ref done(): Array[ByteSeq] iso^ => _done('p') 
 
 class QueryMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
+
   new create(q: String) => _write(q)
   fun ref done(): Array[ByteSeq] iso^ =>_zero(); _done('Q') 
 
 class DescribeMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
 
   new create(typ: U8, name: String) =>
     _u8(typ)
@@ -114,7 +132,10 @@ class DescribeMessage is ClientMessage
   fun ref done(): Array[ByteSeq] iso^ => _done('D') 
 
 class CloseMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
 
   new create(typ: U8, name: String) =>
     _u8(typ)
@@ -124,7 +145,10 @@ class CloseMessage is ClientMessage
   fun ref done(): Array[ByteSeq] iso^ => _done('C') 
 
 class ParseMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
 
   new create(query: String, name: String, param_types: Array[I32] val) =>
     _write(name)
@@ -139,7 +163,10 @@ class ParseMessage is ClientMessage
   fun ref done(): Array[ByteSeq] iso^ => _done('P') 
 
 class BindMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
 
   new create(query: String, name: String, params: Array[PGValue] val) =>
     _write(name)
@@ -158,7 +185,10 @@ class BindMessage is ClientMessage
   fun ref done(): Array[ByteSeq] iso^ => _done('B') 
 
 class ExecuteMessage is ClientMessage
-  let _base: ClientMessageBase delegate ClientMessage = ClientMessageBase
+  var _temp: Writer = Writer
+  var _out: Writer = Writer
+  fun ref _output(): Writer => _out
+  fun ref _w(): Writer => _temp
  
   new create(portal: String, rows: USize) => 
     _write(portal)

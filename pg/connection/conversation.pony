@@ -21,11 +21,11 @@ actor NullConversation is Conversation
   be message(m: ServerMessage val) =>
     _conn.handle_message(m)
 
-
 actor AuthConversation is Conversation
   let _pool: ConnectionManager
   let _params: Array[(String, String)] val
   let _conn: BEConnection tag
+
   new create(p: ConnectionManager, c: BEConnection tag, params: Array[(String, String)] val) =>
     _pool=p
     _conn=c
@@ -59,15 +59,15 @@ actor AuthConversation is Conversation
   be send_md5_pass(pass: String, req: MD5PwdRequest val) =>
     Debug.out(pass)
     let that = recover tag this end
-    _pool.get_user(recover lambda(u: String)(that, pass, req) => that._send_md5_pass(pass, u, req.salt) end end)
+    _pool.get_user(recover {(u: String)(that, pass, req) => that._send_md5_pass(pass, u, req.salt)} end)
 
   be message(m: ServerMessage val!) =>
     let that = recover tag this end
     match m
     | let r: ClearTextPwdRequest val! =>
-      _pool.get_pass(recover lambda(s: String)(that) => that.send_clear_pass(s) end end)
+      _pool.get_pass(recover {(s: String)(that) => that.send_clear_pass(s)} end)
     | let r: MD5PwdRequest val  =>
-      _pool.get_pass(recover lambda(s: String)(that, r) => that.send_md5_pass(s, r) end end)
+      _pool.get_pass(recover {(s: String)(that, r) => that.send_md5_pass(s, r)} end)
     | let r: AuthenticationOkMessage val => None
     | let r: ReadyForQueryMessage val => _conn.next()
     else
@@ -91,10 +91,10 @@ actor FetchConversation is Conversation
   let _conn: BEConnection tag
   var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
-  var _buffer: (Array[Record val] trn | Array[Record val] val)
-  let _buffers: Array[Array[Record val] val] = Array[Array[Record val] val]
+  var _buffer: Array[Record val] trn = recover trn Array[Record val] end
   var _notify: (FetchNotify iso | None) 
   let _size: USize
+  var _complete: Bool = false
   let logger: Logger[String val] val
 
   new create(c: BEConnection tag, q: String,
@@ -104,7 +104,6 @@ actor FetchConversation is Conversation
     _conn = c
     _size = n.size()
     _notify = consume n
-    _buffer = recover trn Array[Record val] end
     logger = StringLogger(Warn, out)
 
   be _batch(b: BatchRowMessage val) =>
@@ -112,8 +111,8 @@ actor FetchConversation is Conversation
     try 
       for m in b.rows.values() do
         let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-        (_buffer as Array[Record val] trn).push(record)
-        if _buffer.size() == _size then
+        _buffer.push(record)
+        if (_buffer.size() == _size) and (_size > 0) then
           _do_send()
         end 
       end
@@ -127,29 +126,28 @@ actor FetchConversation is Conversation
     end
 
   be _next() =>
-    _execute()
+    Debug.out("next")
+    if not _complete then _execute() else Debug.out("Nope") end
 
   be _stop() =>
     try (_notify as FetchNotify iso).stop() end
     
   be _send() =>
     logger(Fine) and logger.log("coucou")
-    _do_send()
+    if _buffer.size() > 0 then
+      _do_send()
+    end
 
   fun ref _do_send() =>
-   Debug.out("send")
-    _buffer = recover val _buffer end
+    Debug.out("send")
     let b = _buffer = recover trn Array[Record val] end
     try
       let that = recover tag this end
-      (_notify as FetchNotify iso).batch(b, recover val
-        lambda(fn: (FetchNotify iso | None)=None) (that) => 
+      (_notify as FetchNotify iso).batch(consume val b, recover val
+        {(fn: (FetchNotify iso | None)=None) (that) => 
           that._set_notifier(consume fn)
-          that._next()
-        end
+          that._next()}
       end)
-    else
-      _buffers.push(b)
     end
 
   be message(m: ServerMessage val)=>
@@ -158,21 +156,18 @@ actor FetchConversation is Conversation
     | let r: CloseCompleteMessage val => _sync()
     | let r: BindCompleteMessage val => None //_describe()
     | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: BatchRowMessage val =>
-      None
-      //for row' in r.rows.values() do
-      //  row(row')
-      //end
-      _batch(r)
+    | let r: BatchRowMessage val => _batch(r)
     | let r: RowDescriptionMessage val =>
       Debug.out("row_desc")
       _tuple_desc = r.tuple_desc
       _execute()
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
     | let r: CommandCompleteMessage val =>
+      Debug.out("Completed")
+      _complete = true
+      _close()
       _send()
       _stop()
-      _close()
     | let r: PortalSuspendedMessage val =>  _send()
     else
       _conn.handle_message(m)
@@ -208,125 +203,11 @@ actor FetchConversation is Conversation
     _conn.writev(recover val DescribeMessage('P', "").done() end)
     _flush()
 
-  be _close() =>
+  fun _close() =>
     Debug.out("close")
     _conn.writev(recover val CloseMessage('P', "").done() end)
     _flush()
 
-actor FetchConversation2 is Conversation
-  let query: String val
-  let params: Array[PGValue] val
-  let _conn: BEConnection tag
-  var _rows: (Rows val | Rows trn ) = recover trn Rows end
-  var _tuple_desc: (TupleDescription val | None) = None
-  var _buffer: (Array[Record val] trn | Array[Record val] val)
-  var status: FetchStatus val= Suspended
-  let _notify: FetchNotify iso
-  let _size: USize
-
-  new create(c: BEConnection tag, q: String,
-             n: FetchNotify iso, p: Array[PGValue] val) =>
-    query = q
-    params = p
-    _conn = c
-    _size = n.size()
-    _notify = consume n
-    _buffer = recover trn Array[Record val] end
-
-  be start() => 
-    if status is Suspended then _execute() end
-    if _buffer.size() > 0 then
-       /*Debug.out("Batch " + _buffer.size().string())*/
-       _buffer = recover val _buffer end
-       let b = _buffer = recover trn Array[Record val] end
-       status = Paused
-       //_notify.batch(b)
-    end
-    status = Sending
-
-  be pause() =>
-    /*Debug.out("paused")*/
-    if status is Sending then status = Paused end
-
-  be row(m: DataRowMessage val) =>
-    Debug.out("row")
-    _handle_row(m)
-
-  fun ref _handle_row(m: DataRowMessage val) =>
-    try
-      let record = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-      if status is Sending then
-        Debug.out("Sending")
-        status = Paused
-        _notify.record(record) 
-        start()
-      else
-        Debug("Buffer")
-        (_buffer as Array[Record val] trn).push(record)
-      end
-    end
-
-  be batch(rows: Array[DataRowMessage val] val) =>
-    for row' in rows.values() do
-      _handle_row(row')
-    end
-
-
-  be message(m: ServerMessage val)=>
-    match m
-    | let r: ParseCompleteMessage val => None //_bind()
-    | let r: CloseCompleteMessage val => _sync()
-    | let r: BindCompleteMessage val => None //_describe()
-    | let r: ReadyForQueryMessage val => _conn.next()
-    | let r: BatchRowMessage val =>
-      None
-      //for row' in r.rows.values() do
-      //  row(row')
-      //end
-      batch(r.rows)
-    | let r: RowDescriptionMessage val =>
-      _tuple_desc = r.tuple_desc
-      start()
-    | let r: EmptyQueryResponse val => Debug.out("Empty Query")
-    | let r: CommandCompleteMessage val => _close()
-    | let r: PortalSuspendedMessage val => match status
-      | Sending => Debug.out("continue");_execute()
-      | Paused => Debug.out("suspend");status = Suspended
-      end
-    else
-      _conn.handle_message(m)
-    end
-
-  be log(msg: String) => _conn.log(msg)
-
-  fun _sync() =>
-    _conn.writev(recover val SyncMessage.done() end)
-
-  fun _flush() =>
-    _conn.writev(recover val FlushMessage.done() end)
-
-  be apply(c: BEConnection tag) =>
-    c.writev(recover val ParseMessage(query, "", TypeOids(params)).done() end)
-    _bind()
-    _describe()
-    _flush()
-
-  be _bind() =>
-    _conn.writev(recover val BindMessage("", "", params).done() end)
-    _flush()
-
-  be _execute() =>
-    /*Debug.out("execute")*/
-    _conn.writev(recover val ExecuteMessage("", _size).done() end)
-    _flush()
-
-  be _describe() =>
-    _conn.writev(recover val DescribeMessage('P', "").done() end)
-    _flush()
-
-  be _close() =>
-    _conn.writev(recover val CloseMessage('P', "").done() end)
-    _flush()
 
 actor ExecuteConversation is Conversation
   let query: String val
@@ -435,7 +316,9 @@ actor QueryConversation is Conversation
     end
 
   be batch(r: BatchRowMessage val) =>
+    Debug.out("do batch")
     for row' in r.rows.values() do
+      Debug.out("r")
       try
         let res = recover val Record(_tuple_desc as TupleDescription val, row'.fields) end
         (_rows as Rows trn).push(res)
@@ -443,7 +326,7 @@ actor QueryConversation is Conversation
       end
     end
 
-  be message(m: ServerMessage val)=>
+  be message(m: ServerMessage val) =>
     match m
     | let r: EmptyQueryResponse val => Debug.out("Empty Query")
     | let r: CommandCompleteMessage val => call_back(); Debug.out(r.command)

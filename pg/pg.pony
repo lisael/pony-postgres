@@ -29,7 +29,7 @@ actor Session
              host: (String | None) = None,
              service: (String| None) = None,
              user: (String | None) = None,
-             password: (String | PasswordProvider tag) = "",
+             password: (String | PasswordProvider tag| None) = None,
              database: (String | None) = None
              ) =>
     _env = env
@@ -75,6 +75,7 @@ actor Session
 
     // Define the password strategy
     let provider = match password
+      | None => EnvPasswordProvider(env)
       | let p: PasswordProvider tag => p
       | let s: String => RawPasswordProvider(s)
       else
@@ -82,7 +83,7 @@ actor Session
       end
 
     _mgr = ConnectionManager(host', service', user', provider, 
-      recover val [("user", user'), ("database", database')] end, env.out)
+      recover val [("user", user'); ("database", database')] end, env.out)
 
   be log(msg: String) =>
     _env.out.print(msg)
@@ -93,10 +94,9 @@ actor Session
   be execute(query: String,
              handler: RecordCB val,
              params: (Array[PGValue] val | None) = None) =>
-    let f = recover lambda(c: Connection)(query, params, handler) =>
+    let f = recover {(c: Connection)(query, params, handler) =>
         c.execute(query, handler, params)
-      end
-    end
+    } end
     try _mgr.connect(_env.root as AmbientAuth, consume f) end
 
   be terminate()=>
