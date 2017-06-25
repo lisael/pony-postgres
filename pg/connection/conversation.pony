@@ -75,27 +75,41 @@ actor AuthConversation is Conversation
     end
 
 
-trait FetchStatus
+class NullFetchNotify is FetchNotify
+  fun ref batch(records: Array[Record val] val, next: FetchNotifyNext val) =>
+    next(None)
 
-primitive _Sending is FetchStatus
-primitive _Paused is FetchStatus
-primitive _Suspended is FetchStatus
+actor Fetcher
+  var _notify: FetchNotify iso = recover iso NullFetchNotify end
+  let _conv: FetchConversation tag
 
-type Sending is _Sending val
-type Paused is _Paused val
-type Suspended is _Suspended val
+  new create(conv: FetchConversation tag, n: FetchNotify iso) =>
+    _notify = consume n
+    _conv =  conv
+
+  be apply(records: Array[Record val] val, next: FetchNotifyNext val) =>
+    _notify.batch(records, next)
+
+  be set_notifier(fn: (FetchNotify iso | None)) =>
+    match consume fn
+    | let f: FetchNotify iso => _notify = consume f
+    end
+
+  be stop() =>
+    _notify.stop()
+    
+
 
 actor FetchConversation is Conversation
   let query: String val
   let params: Array[PGValue] val
   let _conn: BEConnection tag
-  var _rows: (Rows val | Rows trn ) = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
   var _buffer: Array[Record val] trn = recover trn Array[Record val] end
-  var _notify: (FetchNotify iso | None) 
   let _size: USize
   var _complete: Bool = false
   let logger: Logger[String val] val
+  let fetcher: Fetcher tag
 
   new create(c: BEConnection tag, q: String,
              n: FetchNotify iso, p: Array[PGValue] val, out: OutStream) =>
@@ -103,7 +117,7 @@ actor FetchConversation is Conversation
     params = p
     _conn = c
     _size = n.size()
-    _notify = consume n
+    fetcher = Fetcher(this, consume n)
     logger = StringLogger(Warn, out)
 
   be _batch(b: BatchRowMessage val) =>
@@ -120,35 +134,28 @@ actor FetchConversation is Conversation
       Debug.out("can't create and push record")
     end
 
-  be _set_notifier(fn: (FetchNotify iso | None)) =>
-    match consume fn
-    | let f: FetchNotify iso => _notify = consume f
-    end
-
   be _next() =>
     Debug.out("next")
     if not _complete then _execute() else Debug.out("Nope") end
 
-  be _stop() =>
-    try (_notify as FetchNotify iso).stop() end
-    
   be _send() =>
     logger(Fine) and logger.log("coucou")
     if _buffer.size() > 0 then
       _do_send()
     end
 
+  be stop() =>
+    fetcher.stop()
+
   fun ref _do_send() =>
     Debug.out("send")
     let b = _buffer = recover trn Array[Record val] end
-    try
-      let that = recover tag this end
-      (_notify as FetchNotify iso).batch(consume val b, recover val
-        {(fn: (FetchNotify iso | None)=None) (that) => 
-          that._set_notifier(consume fn)
-          that._next()}
-      end)
-    end
+    let that = recover tag this end
+    fetcher(consume val b, recover val
+      {(fn: (FetchNotify iso | None)=None) (that) => 
+        fetcher.set_notifier(consume fn)
+        that._next()}
+    end)
 
   be message(m: ServerMessage val)=>
     match m
@@ -167,7 +174,7 @@ actor FetchConversation is Conversation
       _complete = true
       _close()
       _send()
-      _stop()
+      stop()
     | let r: PortalSuspendedMessage val =>  _send()
     else
       _conn.handle_message(m)
@@ -195,18 +202,18 @@ actor FetchConversation is Conversation
 
   be _execute() =>
     Debug.out("execute")
-    _conn.writev(recover val ExecuteMessage("", _size).done() end)
     _flush()
+    _conn.writev(recover val ExecuteMessage("", _size).done() end)
 
   be _describe() =>
     Debug.out("describe")
-    _conn.writev(recover val DescribeMessage('P', "").done() end)
     _flush()
+    _conn.writev(recover val DescribeMessage('P', "").done() end)
 
   fun _close() =>
     Debug.out("close")
-    _conn.writev(recover val CloseMessage('P', "").done() end)
     _flush()
+    _conn.writev(recover val CloseMessage('P', "").done() end)
 
 
 actor ExecuteConversation is Conversation
@@ -214,7 +221,7 @@ actor ExecuteConversation is Conversation
   let params: Array[PGValue] val
   let _conn: BEConnection tag
   let _handler: RecordCB val
-  var _rows: (Rows val | Rows trn ) = recover trn Rows end
+  var _rows: Rows trn = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
   new create(c: BEConnection tag, q: String, h: RecordCB val, p: Array[PGValue] val) =>
@@ -254,15 +261,12 @@ actor ExecuteConversation is Conversation
   be row(m: DataRowMessage val) =>
     try
       let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-      (_rows as Rows trn).push(res)
+      _rows.push(res)
     end
 
   be call_back() =>
-    // TODO; don't fail silently
-    try
-      _rows = recover val  _rows as Rows trn end
-      _handler(_rows as Rows val)
-    end
+    let rows = _rows = recover trn Rows end
+    _handler(consume val rows)
 
   be message(m: ServerMessage val)=>
     match m
@@ -287,7 +291,7 @@ actor QueryConversation is Conversation
   let query: String val
   let _conn: BEConnection tag
   let _handler: RecordCB val
-  var _rows: (Rows val | Rows trn ) = recover trn Rows end
+  var _rows: Rows trn = recover trn Rows end
   var _tuple_desc: (TupleDescription val | None) = None
 
   new create(c: BEConnection tag, q: String, h: RecordCB val) =>
@@ -301,28 +305,20 @@ actor QueryConversation is Conversation
     c.writev(recover val QueryMessage(query).done() end)
 
   be call_back() =>
-    // TODO; don't fail silently
-    Debug.out("coucou")
-    try
-      _rows = recover val  _rows as Rows trn end
-      _handler(_rows as Rows val)
-    end
+    let rows = _rows = recover trn Rows end
+    _handler(consume val rows)
 
   be row(m: DataRowMessage val) =>
     try
       let res = recover val Record(_tuple_desc as TupleDescription val, m.fields) end
-      (_rows as Rows trn).push(res)
-      Debug.out(res(0))
+      _rows.push(res)
     end
 
   be batch(r: BatchRowMessage val) =>
-    Debug.out("do batch")
     for row' in r.rows.values() do
-      Debug.out("r")
       try
         let res = recover val Record(_tuple_desc as TupleDescription val, row'.fields) end
-        (_rows as Rows trn).push(res)
-        Debug.out(res(0))
+        _rows.push(res)
       end
     end
 

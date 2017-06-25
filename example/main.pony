@@ -35,49 +35,20 @@ class User
 class BlogEntryRecordNotify is FetchNotify
   var entries: Array[BlogEntry val] trn = recover trn Array[BlogEntry val] end
   let view: BlogEntriesView tag
-  let logger: Logger[String val] val
 
-  new iso create(v: BlogEntriesView tag, out: OutStream) =>
+  new iso create(v: BlogEntriesView tag) =>
     view = v
-    logger = StringLogger(Warn, out)
-
-  fun ref descirption(desc: RowDescription) =>
-    logger.log("Got description")
-
-  fun size(): USize => 1000
-
-  fun ref batch(b: Array[Record val] val, next: FetchNotifyNext val) =>
-    logger.log("Fetch entries")
-    try
-      for r in b.values() do
-        // logger.log((r(0) as I32).string())
-        let e = recover val BlogEntry(
-          r(0) as I32,
-          2, 3
-          //r(1) as I32,
-          //r(2) as I32
-        ) end
-        // logger.log(e.string())
-        entries.push(e)
-      end
-    end
-    next(None)
 
   fun ref record(r: Record val) =>
-    logger.log(".")
-    try
-       let e = recover val BlogEntry(
-          r(0) as I32,
-          2, 3
-          /*r(1) as I32,*/
-          /*r(2) as I32*/
-        ) end
-      // Debug.out(e.string())
-      /*(entries as Array[BlogEntry val] trn).push(e)*/
+    let e = recover val BlogEntry(
+      r(0) as I32,
+      2, 3
+      /*r(1) as I32,*/
+      /*r(2) as I32*/
+    ) end
+    entries.push(e)
 
-    end
   fun ref stop() =>
-    logger.log("stop")
     let entries' = entries = recover trn Array[BlogEntry val] end
     view.entries(consume val entries')
 
@@ -127,8 +98,8 @@ actor BlogEntriesView
       Debug("fetch_entries")
       (_conn as Connection).fetch(
         /*"SELECT 1 as user_id, 2, 3 UNION ALL SELECT 4 as user_id, 5, 6 UNION ALL SELECT 7 as user_id, 8, 9",*/
-        "SELECT generate_series(0,10000)",
-        recover BlogEntryRecordNotify(this, out) end)
+        "SELECT generate_series(0,100)",
+        recover BlogEntryRecordNotify(this) end)
     end
 
   be fetch_user() =>
@@ -172,6 +143,7 @@ actor Main
     logger = StringLogger(Fine, env.out)
     session = Session(env where password=EnvPasswordProvider(env))
     let that = recover tag this end
+    """
     session.execute("SELECT generate_series(0,1)",
              recover val
               {(r: Rows val)(that) =>
@@ -195,7 +167,7 @@ actor Main
                       }
                     end,
                    recover val [as PGValue: I32(70000); I32(-100000)] end)
-
+    """
   
     let p = session.connect(recover val
       {(c: Connection tag)(env) =>
