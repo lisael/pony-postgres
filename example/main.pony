@@ -31,6 +31,9 @@ class User
   new create(id': I32) =>
     id = id'
 
+  fun string(): String =>
+    "User #" + id.string()
+
 
 class BlogEntryRecordNotify is FetchNotify
   var entries: Array[BlogEntry val] trn = recover trn Array[BlogEntry val] end
@@ -40,13 +43,15 @@ class BlogEntryRecordNotify is FetchNotify
     view = v
 
   fun ref record(r: Record val) =>
-    let e = recover val BlogEntry(
-      r(0) as I32,
-      2, 3
-      /*r(1) as I32,*/
-      /*r(2) as I32*/
-    ) end
-    entries.push(e)
+    try
+      let e = recover val BlogEntry(
+        r(0) as I32,
+        2, 3
+        /*r(1) as I32,*/
+        /*r(2) as I32*/
+      ) end
+      entries.push(e)
+    end
 
   fun ref stop() =>
     let entries' = entries = recover trn Array[BlogEntry val] end
@@ -133,6 +138,111 @@ actor BlogEntriesView
     _entries.next[None](recover this~render() end)
 
 
+interface iso Hydrate[A: Any #share]
+  fun apply(record: Record val): A
+
+
+class iso HydrateAll[A: Any #share]
+  let _h: Hydrate[A] val
+
+  new create(h: Hydrate[A] val) =>
+    _h = h
+
+  fun ref apply(records: Array[Record val] val): Array[A] val =>
+    let result = recover trn Array[A] end
+    for r in records.values() do
+      result.push(_h(r))
+    end
+    consume val result
+
+
+class iso HydrateOne[A: Any #share]
+  let _h: Hydrate[A] val
+
+  new create(h: Hydrate[A] val) =>
+    _h = h
+
+  fun ref apply(records: Array[Record val] val): A ? =>
+    if records.size() != 1 then error end
+    _h(records(0))
+
+
+class DBPromise[A: Any #share]
+  let _query: String val
+  let _sess: Session tag
+  let promise: Promise[Array[Record val] val] = Promise[Array[Record val] val]
+  var _sent: Bool = false
+  var _h: Hydrate[A] val
+
+  new iso create(query: String val, session: Session tag,
+                 hydrate: Hydrate[A] val) =>
+    _query = query
+    _sess = session
+    _h = hydrate
+
+  fun ref _execute() =>
+    if not _sent then
+      Debug("execute")
+      _sess.execute(_query, recover val {(records: Array[Record val] val) =>
+        promise(records)
+      } end)
+      _sent = true
+    end
+
+  fun ref all[B: Any #share](
+    fulfill: Fulfill[Array[A] val, B],
+    rejected: Reject[B] = RejectAlways[B])
+    : Promise[B] =>
+    _execute()
+    let result = promise.next[Array[A] val](recover HydrateAll[A](_h) end)
+    result.next[B](consume fulfill, consume rejected)
+    
+  fun ref one[B: Any #share](
+    fulfill: Fulfill[A, B],
+    rejected: Reject[B] = RejectAlways[B])
+    : Promise[B] =>
+    Debug("One")
+    _execute()
+    let result = promise.next[A](recover HydrateOne[A](_h) end)
+    result.next[B](consume fulfill, consume rejected)
+
+
+primitive UserManager
+  fun table(): String => "user"
+  fun fields(): Array[String] val => recover val [
+    "id"
+  ] end
+  fun hydrate(r: Record val): User val=>
+    try
+      recover val User(r("id") as I32) end
+    else
+      recover val User(42) end
+    end
+
+  fun by_id(id: I32, sess: Session): DBPromise[User val]=>
+    DBPromise[User val]("SELECT 12 as id;", sess, recover UserManager~hydrate() end)
+    
+
+actor RequestContext
+  let _user: DBPromise[User val]
+
+  new create(user_id: I32, sess: Session) =>
+    _user = UserManager.by_id(user_id, sess)
+
+  be user(callback: {(User val)} iso) =>
+    Debug("call user")
+    _user.one[None](consume callback)
+
+
+actor BlogView
+  let _ctx: RequestContext tag
+  new create(ctx: RequestContext tag) =>
+    _ctx = ctx
+
+  be render(out: OutStream) =>
+    _ctx.user(recover {(u: User val) => out.write("Hello " + u.string())} end)
+
+
 actor Main
   let session: Session
   let _env: Env
@@ -143,6 +253,10 @@ actor Main
     logger = StringLogger(Fine, env.out)
     session = Session(env where password=EnvPasswordProvider(env))
     let that = recover tag this end
+    let bv = BlogView(RequestContext(1, session))
+    bv.render(env.out)
+    bv.render(env.out)
+
     """
     session.execute("SELECT generate_series(0,1)",
              recover val
@@ -167,13 +281,13 @@ actor Main
                       }
                     end,
                    recover val [as PGValue: I32(70000); I32(-100000)] end)
-    """
   
     let p = session.connect(recover val
       {(c: Connection tag)(env) =>
         BlogEntriesView(env.out)(c)
       }
-    end) 
+    end)
+    """
 
 
   be raw_count(rows: Rows val) =>

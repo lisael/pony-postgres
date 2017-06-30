@@ -1,14 +1,15 @@
 use "debug"
 use "pg/connection"
 use "pg/introspect"
+use "dbapi"
 
 
 type FetchNotifyNext is {((FetchNotify iso | None))}
 
 interface FetchNotify
   fun ref descirption(desc: RowDescription) => None
-  fun ref record(r: Record val) => None
-  fun ref batch(records: Array[Record val] val, next: FetchNotifyNext val) =>
+  fun ref record(r: Projection val) => None
+  fun ref batch(records: Array[Projection val] val, next: FetchNotifyNext val) =>
     next(None)
     for r in records.values() do
       record(r)
@@ -18,7 +19,7 @@ interface FetchNotify
   fun size(): USize => 0
 
 primitive _ReleasAfter
-  fun apply(c: Connection tag, h: RecordCB val, records: Array[Record val] val) =>
+  fun apply(c: Connection tag, h: ProjectionsHandler val, records: Array[Record val] val) =>
     h(records)
     c.release()
 
