@@ -167,7 +167,7 @@ class iso HydrateOne[A: Any #share]
     _h(records(0))
 
 
-class DBPromise[A: Any #share]
+class SQLPromise[A: Any #share]
   let _query: String val
   let _sess: Session tag
   let promise: Promise[Array[Record val] val] = Promise[Array[Record val] val]
@@ -219,12 +219,12 @@ primitive UserManager
       recover val User(42) end
     end
 
-  fun by_id(id: I32, sess: Session): DBPromise[User val]=>
-    DBPromise[User val]("SELECT 12 as id;", sess, recover UserManager~hydrate() end)
+  fun by_id(id: I32, sess: Session): SQLPromise[User val]=>
+    SQLPromise[User val]("SELECT 12 as id;", sess, recover UserManager~hydrate() end)
     
 
 actor RequestContext
-  let _user: DBPromise[User val]
+  let _user: SQLPromise[User val]
 
   new create(user_id: I32, sess: Session) =>
     _user = UserManager.by_id(user_id, sess)

@@ -1,8 +1,7 @@
 use "pg/introspect"
 use "pg/codec"
-use "dbapi"
 
-class Projection is DBRecord
+class Record
   let _desc: TupleDescription val
   let _tuple: Array[FieldData val] val
 
@@ -13,5 +12,9 @@ class Projection is DBRecord
   fun apply(idx: ( USize | String )): PGValue ? =>
     (let pos: USize, let d: FieldDescription val) = _desc(idx)
     Decode(d.type_oid, _tuple(pos).data, d.format)
+    // if false then error else I32(1) end
 
-interface ProjectionsHandler is DBRecordsHandler
+interface RecordCB
+  fun apply(iter: Array[Record val] val)
+
+type Rows is Array[Record val]
